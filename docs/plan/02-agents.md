@@ -31,6 +31,26 @@ Two invariants:
 
 ## 2. The roster
 
+> The roster below is the **BUILD path**. The **INVESTIGATE path** (RE/VR) uses a
+> smaller roster — Analyst, Verifier, Reporter, Manager — over the same runtime and
+> contract; see [10-dual-path-and-existing-repos.md](10-dual-path-and-existing-repos.md).
+> The path is chosen at session start (`--path build|investigate`).
+
+### 2.0 Codebase Cartographer (`cartographer`) — BUILD, existing repos
+
+- **Model class:** REASONER, large context. **Runs once per repo**, cached and
+  refreshed incrementally on file-hash change — not once per story.
+- **Owns state:** `INTAKE → MAPPED` (a new first state, since almost all work is on
+  existing codebases).
+- **Outputs:** `CodebaseMap` — modules and inferred responsibilities, conventions,
+  build/test entry points, dependency graph, hotspots, style exemplars, discovered
+  invariants, and `danger_zones` (untested/vendored/generated code).
+- A **digest** of the map is injected into the stable prompt prefix of every
+  downstream agent ([05](05-inference-and-topology.md) §5), so the whole roster
+  inherits repo awareness at near-zero marginal cost via prefix caching. Its
+  `conventions` feed the per-repo style gates and its `exemplars` feed the context
+  assemblers. Full detail in [10](10-dual-path-and-existing-repos.md) §3.
+
 ### 2.1 Product Owner (`po`)
 
 - **Model class:** REASONER. **Temp:** 0.3.
@@ -188,42 +208,56 @@ comes from:
   invoked frequently, that is a signal the gates or the Architect's decomposition
   are wrong, and the Scrum Master should surface it.
 
-### 2.10 Specialist roles (Phase 5)
+### 2.10 INVESTIGATE-path roster (RE/VR)
 
-- **Reverse Engineer (`re`)** — owns binary-analysis stories. Model class CODER
-  with a domain playbook. Tools: Ghidra headless, rizin/r2pipe, capa, objdump,
-  gdb/pwndbg, angr. Output artifact: `AnalysisReport` with function-level findings,
-  recovered structures, and a *reproducible script* — the gate re-runs the script
-  and diffs the output, so "I analysed it" is provable.
-- **Vulnerability Researcher (`vr`)** — owns hypothesis→harness→triage loops.
-  Output: `VulnFinding` with a **proof-of-crash artifact** (input file + ASAN
-  trace + reproduction script). No PoC, no finding. This is the same
-  provenance principle applied to security work.
+The INVESTIGATE path runs a distinct, smaller roster over the same runtime — see
+[10-dual-path-and-existing-repos.md](10-dual-path-and-existing-repos.md) for its
+state machine and artifacts. Summary:
+
+- **Analyst (`analyst`)** — CODER class + RE domain playbook. Emits *scripts* (Ghidra
+  headless, rizin/r2pipe, capa, angr) that the harness runs; the attested script
+  output is the Evidence. Produces `Finding`s that must cite that evidence. A claim
+  with no producing script is inadmissible.
+- **Verifier (`verifier`)** — JUDGE class, fresh context, never sees the Analyst's
+  reasoning. Independently regenerates a reproduction for each `Finding`; the harness
+  re-runs it and a claim that doesn't reproduce is demoted to a hypothesis. The
+  analysis-side analogue of the Reviewer.
+- **Reporter (`reporter`)** — REASONER class. Writes the `AnalysisReport`; every
+  sentence links to an Evidence/Verification id, and the mandatory `unknowns` list
+  is the honest analogue of a parked story.
+- **Vulnerability findings** on this path carry a **proof-of-crash** (input blob +
+  sanitizer trace + reproduction script) and a fix-verification record. No PoC, no
+  finding — the same provenance principle as everywhere else.
 
 ## 3. Model routing
 
-Roles name a **class**; a routing table binds classes to endpoints. This keeps the
-roster portable across hardware.
+Roles name a **class**; a routing table binds classes to endpoints. The class
+abstraction is kept even though the hardware is now a fixed H200 rack — it's what
+lets the roster, the eval sweeps, and the prompts stay independent of which
+checkpoint sits behind each class.
 
 ```yaml
 model_classes:
-  REASONER: { endpoint: local, model: qwen3-30b-a3b-instruct, ctx: 32768 }
-  CODER:    { endpoint: local, model: qwen3-coder-30b-a3b,     ctx: 32768 }
-  CHEAP:    { endpoint: local, model: qwen3-4b-instruct,       ctx: 16384 }
-  JUDGE:    { endpoint: local, model: qwen3-30b-a3b-instruct,  ctx: 16384,
-              seed_offset: 7919 }   # different seed ⇒ decorrelated from CODER
+  REASONER: { endpoint: rack, model: Qwen3.5-397B-A17B-FP8,  ctx: 128000 }
+  CODER:    { endpoint: rack, model: Qwen3-Coder-Next-FP8,   ctx: 128000 }
+  JUDGE:    { endpoint: rack, model: Qwen3.5-397B-A17B-FP8,  ctx:  64000 }
+  CHEAP:    { endpoint: rack, model: <small Qwen3 instruct>, ctx:  32000 }
+  EMBED:    { endpoint: rack, model: <bge-m3 / qwen3-embed>, ctx:   8000 }
 ```
 
-- With ~2 resident models, `REASONER` and `JUDGE` share weights but differ in seed,
-  temperature, system prompt, and — critically — context. Independence of *context*
-  does most of the work; independence of *weights* is a bonus you buy with RAM.
+- Both large models are **resident simultaneously** on the rack (vLLM, separate GPU
+  groups), so there is **no swapping** — the laptop-era swap policy, swap batching,
+  and `swaps_per_task` metric are deleted. See
+  [05-inference-and-topology.md](05-inference-and-topology.md).
+- `JUDGE` shares the REASONER checkpoint but runs with an offset seed and, more
+  importantly, an independent context that never contains the author's rationale.
+  Context independence does most of the work; here weight-sharing costs nothing.
+- **The binding constraint is now the laptop's compile/test capacity, not
+  inference.** The router optimises for gate-runner throughput, not token cost:
+  it fans out best-of-N generations freely, then a cheap static pre-filter culls
+  candidates before the expensive gate battery runs. See [05](05-inference-and-topology.md) §4.
 - `CHEAP` handles classification, extraction, summarisation, the comprehension
-  probe, and the Scrum Master. Keeping a 4B resident alongside a 30B MoE is cheap
-  and removes a lot of swap churn.
-- The router owns a **queue with priorities** so a cheap probe never blocks the
-  critical path, and a **swap policy** that batches all pending CODER work before
-  swapping to REASONER. Model swaps are the dominant latency cost on a laptop;
-  the scheduler should be swap-aware. See [05](05-model-serving-offline.md).
+  probe, and the Scrum Master.
 
 ## 4. Context assembly policy
 
@@ -250,6 +284,6 @@ Assembly rules:
 3. **Exemplars beat instructions.** For style-shaped tasks (test readability,
    naming, error messages), include 1–2 *good examples from this repo* rather than
    another paragraph of rules. Small models imitate far better than they follow.
-4. **Stable prefix ordering** for prompt-cache reuse (see [05](05-model-serving-offline.md)).
+4. **Stable prefix ordering** for prompt-cache reuse (see [05](05-inference-and-topology.md)).
 5. Every assembler is unit-tested for *negative* containment: "reviewer context
    must not contain `impl_rationale`".

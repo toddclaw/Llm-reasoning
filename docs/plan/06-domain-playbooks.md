@@ -85,21 +85,28 @@ The hardest domain for a small model, and the one where the harness earns its ke
 
 ## 4. Reverse engineering
 
-**Sandbox first.** Every binary under analysis is untrusted. Analysis runs in a
-container with `--network=none`, read-only mount of the sample, a seccomp profile,
-no host device access, and a strict wall-clock/memory cap. *Execution* of a sample
-(as opposed to static analysis) happens only under `qemu-user` or a disposable
-microVM, never in the analysis container, and only when the story explicitly
-requests dynamic analysis with a recorded justification.
+**Isolation is topological, not just a seccomp profile.** Every binary under
+analysis is untrusted, and the deployment gives us a real boundary the laptop plan
+lacked (see [05](05-inference-and-topology.md) §1 and
+[10](10-dual-path-and-existing-repos.md)): static analysis runs in the agent
+container (`--network=none`, sample read-only, wall-clock/memory capped), and
+*execution* of a sample happens only in a **Proxmox QEMU VM with no route back to
+the laptop**. The agent never touches the sample directly — it emits scripts the
+harness runs in that VM over the host-owned tunnel, and evidence flows back by pull.
+A one-way network beats a seccomp policy for detonation safety.
+
+This maps onto the INVESTIGATE-path roster (Analyst / Verifier / Reporter,
+[02](02-agents.md) §2.10) and its `POSED→…→ANSWERED` state machine
+([10](10-dual-path-and-existing-repos.md) §2), not the BUILD scrum roster.
 
 - **Tooling:** Ghidra headless (`analyzeHeadless` + Python/Java scripts), rizin/r2
   via `r2pipe`, `capa` with local rules, `binwalk`, `objdump`/`readelf`/`nm`,
   `gdb`+`pwndbg`, `angr` for symbolic execution on constrained problems.
-- **The key design point: RE work is only agent-tractable when it is scripted.** A
-  small model cannot hold a disassembly in its head. So the `re` agent's output
-  artifact is an **analysis script plus a report**, and the gate re-runs the script
-  and diffs the output against the report. Claims not reproduced by the script are
-  stripped (same P3 mechanism as everywhere else).
+- **The key design point: RE work is only agent-tractable when it is scripted.** No
+  model holds a disassembly in its head reliably. So the Analyst's output is an
+  **analysis script plus a report**; the harness re-runs the script and diffs the
+  output against the report. Claims not reproduced by the script are stripped (same
+  P3 mechanism as everywhere else), and the Verifier reproduces them independently.
 - **Decomposition pattern** the Architect should apply to RE stories:
   1. triage (file type, packing, imports, strings, `capa` capabilities)
   2. surface map (entry points, exported functions, call graph, candidate

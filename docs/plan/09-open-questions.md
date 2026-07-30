@@ -129,3 +129,33 @@ report enough? (A `--watch` TUI is genuinely useful during Phase 2–3 debugging
 **Q15.** Where does documentation live for *your* projects — in-repo Markdown only,
 or a docs site generator (Sphinx/Doxygen/mkdocs) that G-DOC-* should also build and
 link-check?
+
+## New — arising from your answers (A1/A2/A4/A6)
+
+**Q16. Rack sizing.** How many H200s, and how are they grouped? This sets the
+tensor-parallel degree for the 397B model, how many concurrent sequences vLLM can
+serve, and the KV budget at 128k context — which in turn sets how wide best-of-N and
+self-consistency can go. (Not blocking for Phase 0; needed to tune Phase 2 onward.)
+
+**Q17. Where do the gate runners run?** A1 says the laptop runs "compile and test",
+but the resource inversion ([05](05-inference-and-topology.md) §4) makes compile/
+test/mutation the new bottleneck. Options: (a) laptop only; (b) a dedicated
+build/test VM on the Proxmox host; (c) spare rack CPU. Recommendation: put the
+BUILD-path gate runners on a Proxmox build VM so the laptop stays a thin front end
+and mutation/fuzzing can scale — but the target-env *demo* (G-DEMO-*) must still run
+in the isolated target VM, not the build VM. Does that split match your setup?
+
+**Q18. Tunnel + VM lifecycle.** Are the Proxmox target VMs long-lived, or spun from
+a golden snapshot per run/per story (cleaner provenance, better isolation for
+detonation)? And is the single forwarded SSH port stable, or negotiated per run? The
+remote runner's design depends on this.
+
+**Q19. INVESTIGATE authorisation.** For RE/VR, what defines "authorised scope" in
+`scope.yaml` in practice — specific VM IDs, binary hashes, a network range? The
+Analyst's tools hard-refuse outside it, so the schema needs to match how you think
+about targets.
+
+**Q20. Cross-path handoff.** When an INVESTIGATE run produces a `Finding` ("the
+target parses length-prefixed frames, no bounds check at offset X"), do you want the
+system to *offer* to seed a BUILD story from it automatically, or keep the two paths
+strictly manual with you as the bridge? (Recommendation: offer, never auto-start.)

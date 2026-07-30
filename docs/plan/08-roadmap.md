@@ -1,35 +1,58 @@
 # 08 — Roadmap
 
 Phases are ordered by **risk retirement**, not by feature appeal. The riskiest
-assumptions are (a) that a Qwen3-class model can produce acceptable code under
-tight gates at all, and (b) that we can measure whether the scaffold is improving.
-Both are retired by Phase 2.
+assumptions are (a) that the scaffold + local models can produce **trustworthy**
+code under strict gates — good enough to accept unseen in the morning — and (b) that
+we can measure whether the scaffold is improving. Both are retired by Phase 2.
+
+Ordering reflects the answers in [09](09-open-questions.md):
+**Python forward development is the first vertical slice** (A3); **almost all work is
+on existing repos**, so the Codebase Cartographer lands in Phase 2 (A5); the first
+real milestone is **one trustworthy medium feature**, epics and multi-day backlogs
+come only after that trust exists (A7); and the **INVESTIGATE path plus C/C++
+analysis tooling land together** once BUILD is proven (A6), earlier than the original
+Phase-5 ordering. There is **no quantisation sweep** — the checkpoints are FP8 and
+run natively on the H200s (A1).
+
+Gates start **strict** (A9): mutation ≥75%, diff branch coverage ≥90%, zero `major`
+review findings, zero unjustified suppressions — from Phase 1, not relaxed in later
+phases.
 
 Estimates assume Claude Opus doing the implementation in Claude Code, with you
 reviewing. They are calendar-ish, not person-hours.
 
 ---
 
-## Phase 0 — Foundations and a walking skeleton
-**Retires:** "can this run offline on this laptop at all?"
+## Phase 0 — Foundations, topology, and a walking skeleton
+**Retires:** "does the three-tier topology work end to end, offline?"
 
 Deliverables:
 - Repo scaffold, `uv` project, CI for Nightshift itself (linted, typed, tested —
   we hold ourselves to the standard we're enforcing).
-- Model serving: llama.cpp + llama-swap, OpenAI-compatible client, **grammar
-  generation from pydantic schemas**, deterministic sampling profile.
-- Sandbox: target-env image build, `--network=none` exec, resource limits.
-- Blackboard: SQLite schema, artifact/record models, attestation.
+- **Topology bring-up** ([05](05-inference-and-topology.md) §1): vLLM on the rack
+  serving both FP8 checkpoints resident; agent container with the egress allowlist
+  (rack + tunnel only) and a test asserting nothing else is reachable; the
+  host-owned SSH tunnel to a Proxmox target VM exposed as one forwarded port.
+- Model layer: OpenAI-compatible client to vLLM, **grammar generation from pydantic
+  schemas** via `guided_json`, deterministic sampling profile, prefix-cache-friendly
+  prompt layout with a stability regression test.
+- Provenance: attestation key held on the host; the laptop-side remote runner that
+  executes in the target over the tunnel and attests results (evidence flows by
+  pull, never push).
+- Blackboard: SQLite schema, artifact/record models, attestation verification.
 - Two runners: `test` (pytest) and `lint`.
 - One agent (`tdd-dev:impl`), one state transition, one gate (`G-GREEN-1`).
-- `nightshift run` on a trivial task end to end.
+- `nightshift run --path build` on a trivial task end to end.
 
 **Exit criteria:**
-- A single Python story goes `CONTRACTED → GREEN` on a real local Qwen model,
-  fully offline, with an attested `TestRunRecord`.
-- Bootstrap verified in a `--network=none` container.
-- Measured: tokens/sec, model load time, swap time on the actual laptop. These
-  numbers set every budget in the system, so get them early.
+- A single Python story goes `CONTRACTED → GREEN` against the rack models, fully
+  offline, with a `TestRunRecord` attested on the host.
+- The agent container provably cannot reach the internet, the host filesystem, git
+  push, or ssh — asserted by tests.
+- A target VM cannot initiate a connection back to the laptop — asserted by a test.
+- Measured: rack tokens/sec under concurrency, and **laptop/VM gate-runner
+  throughput** (compile, test, mutation wall-clock). These set every budget, so get
+  them early — the gate runner is the bottleneck now, not inference.
 
 ---
 
@@ -57,23 +80,33 @@ Deliverables:
 
 ---
 
-## Phase 2 — The core scrum loop (Python only)
-**Retires:** "does multi-agent + contract-first actually beat single-agent?"
+## Phase 2 — The core scrum loop on existing Python repos
+**Retires:** "does multi-agent + contract-first beat single-agent, and does one
+medium feature come out trustworthy?"
 
 Deliverables:
+- **Codebase Cartographer** + `MAPPED` state + `CodebaseMap` (A5 — almost all work
+  is on existing repos): convention inference, exemplar extraction, `danger_zones`,
+  characterization-test sub-step. Map digest wired into the stable prompt prefix.
 - PO, Architect, TDD Dev (3 invocations), Reviewer agents with real context
   assemblers and negative-containment tests.
-- Full state machine through `ACCEPTED`, ladder rungs 1–3 and 6, progress detectors.
-- Git worktree pool, branch-per-story, commit trailers.
-- DEMONSTRATED gate with asciinema capture; DOCUMENTED gate with executed
-  README/`--help`.
-- Morning report v1.
+- Full BUILD state machine through `ACCEPTED`, ladder rungs 1–3 and 6, progress
+  detectors, best-of-N with the static pre-filter funnel
+  ([05](05-inference-and-topology.md) §4).
+- Architect self-consistency (k-sample consensus, disagreement surfaced).
+- Git worktree pool, branch-per-story, commit trailers, blast-radius write-scope.
+- DEMONSTRATED gate with asciinema capture **run in a Proxmox target VM over the
+  tunnel**; DOCUMENTED gate with executed README/`--help`.
+- Morning report v1 with the parked-questions section and an "answer the parked
+  questions" CLI (A10 — the morning review-and-answer loop is the operating model).
 
 **Exit criteria:**
+- **The headline milestone (A7): one medium feature on a real existing Python repo
+  comes out `ACCEPTED` and is genuinely finished** — you inspect it and would ship
+  it. Repeat on 3 different features before trusting the loop.
 - ≥60% `accept_rate` on the Phase-1 Python dev suite, with `gate_gap` ≤ 10%.
-- Beats the naive single-agent baseline by ≥25 points of accept_rate at comparable
-  or better token cost — **if it doesn't, stop and diagnose before building more.**
-  This is the go/no-go for the entire thesis.
+- Beats the naive single-agent baseline by ≥25 points of accept_rate — **if it
+  doesn't, stop and diagnose before building more.** Go/no-go for the whole thesis.
 - Median attempts-to-green ≤ 3.
 
 ---
@@ -85,8 +118,11 @@ No new capabilities — this phase is pure optimisation, and it's where the "kee
 iterating until it performs well" requirement actually gets satisfied.
 
 Deliverables:
-- Sweeps: thinking-mode per role, quantisation level, best-of-N width, context
-  budgets, decomposition granularity, ladder shapes, exemplar count.
+- Sweeps: thinking-mode per role, **per-role context budget {8k,24k,64k}**
+  ([05](05-inference-and-topology.md) §6), best-of-N width, decomposition
+  granularity, ladder shapes, exemplar count. (No quant sweep — FP8 is fixed.)
+- Optional ablation: run the suite with a *small* Qwen behind each class to measure
+  scaffold-vs-weights value — the preserved form of the original thesis.
 - Failure taxonomy auto-classification.
 - Prompt/exemplar refinement driven by the taxonomy, not by intuition.
 - Grow the suite to 30 tasks; holdout evaluation at the phase gate.
@@ -101,18 +137,56 @@ Deliverables:
 
 ---
 
-## Phase 4 — C++, Bash, DevOps, DevSecOps
-**Retires:** "does this generalise beyond Python?"
+## Phase 4 — C/C++ analysis tooling + the INVESTIGATE path
+**Retires:** "can the same discipline answer *questions about a system*, not just
+build software?" — and it needs C/C++ tooling to do so (A6: RE targets are C/C++).
+
+Grouped this way because both of your near-term needs land here together: the
+INVESTIGATE path and the C/C++ analysis toolchain it depends on. Forward C/C++
+*development* follows in Phase 5; INVESTIGATE comes first because it's the earlier
+of your two real workloads to need C/C++.
+
+Deliverables:
+- **INVESTIGATE state machine** (`POSED→…→ANSWERED`) and roster (Analyst, Verifier,
+  Reporter, Manager) over the shared runtime — [10](10-dual-path-and-existing-repos.md).
+- `--path investigate` selection, `scope.yaml` enforcement, `Question`/`Evidence`/
+  `Finding`/`Verification`/`AnalysisReport` artifacts.
+- C/C++ analysis toolchain in the agent image and target VM templates: Ghidra
+  headless, rizin/r2pipe, capa, angr, gdb/pwndbg, objdump/readelf.
+- **Script-produces-evidence discipline**: Analyst emits scripts, harness runs them
+  in a target VM over the tunnel, output is attested Evidence; Verifier reproduces
+  independently. This is the A6 requirement — every conclusion backed by
+  reproducible data — made mechanical.
+- Symbol-dictionary working memory (blackboard-backed) for multi-step analysis.
+- Sample-detonation path: run untrusted binaries only in a Proxmox VM with no route
+  back to the laptop; the topology, not seccomp, is the isolation.
+- +12 INVESTIGATE tasks with ground truth (crackmes, planted bugs, Juliet subset,
+  algorithm-recovery scored by differential testing).
+
+**Exit criteria:**
+- Every `Finding` in a passing run is reproduced by the Verifier from attested data;
+  zero unbacked claims survive to the report (the INVESTIGATE F1–F4 gates hold).
+- RE: recovers the target algorithm with a passing differential test on ≥60% of RE
+  tasks.
+- VR: finds ≥70% of planted bugs with a working PoC, false-positive rate ≤20%.
+- Confirmed: a target VM cannot initiate a connection to the laptop, under
+  adversarial review.
+
+---
+
+## Phase 5 — C/C++ forward development, Bash, DevOps, DevSecOps
+**Retires:** "does the BUILD path generalise from Python to C/C++?"
 
 Deliverables:
 - C++ domain playbook: CMake, GoogleTest/Catch2, clangd, sanitizers, gcovr,
-  clang-tidy, mutation.
+  clang-tidy, mutation ([06](06-domain-playbooks.md) §2). Much of the C/C++ analysis
+  toolchain from Phase 4 is reused here.
 - Bash domain playbook: bats, shellcheck, shfmt, preamble gate.
-- DevOps agent: from-scratch build, runtime-image separation, offline CI,
-  reproducibility check, executable runbook.
+- DevOps agent: from-scratch build, runtime-image separation, offline CI in the
+  Proxmox target, reproducibility check, executable runbook.
 - DevSecOps agent: semgrep/bandit/gitleaks, threat-model note, suppression
   discipline.
-- +16 tasks (C++ and Bash), holdout maintained.
+- +16 BUILD tasks (C++ and Bash), holdout maintained.
 
 **Exit criteria:**
 - ≥70% accept_rate on the C++ dev suite (C++ will lag Python; that's expected).
@@ -121,33 +195,16 @@ Deliverables:
 
 ---
 
-## Phase 5 — Reverse engineering and vulnerability research
-**Retires:** "can the same discipline work on analysis-shaped, not build-shaped, work?"
-
-Deliverables:
-- Hardened sandbox: microVM path for sample execution, seccomp, scope enforcement.
-- RE agent + tooling (Ghidra headless, rizin, capa, angr) and the
-  script-plus-report artifact with re-execution gating.
-- VR agent + fuzzing infrastructure, crash triage/dedup/minimisation,
-  `VulnFinding` with mandatory PoC and fix verification.
-- Symbol-dictionary working memory for RE stories.
-- +12 tasks with ground truth (crackmes, planted bugs, Juliet subset).
-
-**Exit criteria:**
-- RE: recovers the target algorithm with a passing differential test on ≥60% of RE
-  tasks.
-- VR: finds ≥70% of planted bugs with a working PoC, at a false-positive rate ≤20%.
-- Zero sandbox escapes in an adversarial review of the isolation setup.
-
----
-
 ## Phase 6 — Full autonomy and UX
 **Retires:** "can I actually leave it alone for nine hours?"
 
 Deliverables:
 - Scrum Master + Manager agents, ladder rungs 4–5, parking with quality questions.
+- Epic decomposition + multi-day backlog scheduling (A7 — only now, after single
+  medium features are trustworthy; a backlog spanning 2–10 days becomes viable).
 - Budgets, reserves, crash resume, sleep/wake survival, kill switch.
-- Swap-aware, resource-class scheduler; background fuzz pool.
+- Resource-class scheduler tuned for the inference-abundant / gate-bound regime
+  ([07](07-overnight-autonomy.md) §5); background fuzz pool.
 - UX agent, demo-cast review, error-message and help-text gates.
 - Morning report v2 with embedded casts, trends, process health.
 

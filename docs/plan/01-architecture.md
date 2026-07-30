@@ -22,8 +22,9 @@
                    │               │
              ┌─────▼─────┐   ┌─────▼──────────────────────────────────┐
              │ MODEL     │   │ EXECUTION SANDBOX                      │
-             │ ROUTER    │   │ target-env container, no network,      │
-             │ llama-swap│   │ build/test/scan/demo runners           │
+             │ ROUTER    │   │ agent container (no net) + Proxmox     │
+             │ → vLLM    │   │ target VMs; build/test/scan/demo       │
+             │   (rack)  │   │ runners, attested on the host          │
              └───────────┘   └────────────────────────────────────────┘
                    │
              ┌─────▼───────────────────────────────────────────────────┐
@@ -247,7 +248,7 @@ from the corresponding Record or, if no Record exists, nulls it and emits a
 the eval harness uses hallucination rate as a first-class score.
 
 **Prompt layout is fixed for cache reuse** (see
-[05-model-serving-offline.md](05-model-serving-offline.md)): stable prefix
+[05-inference-and-topology.md](05-inference-and-topology.md)): stable prefix
 (role system prompt → tool definitions → contract → domain playbook) then volatile
 suffix (current failure evidence → the ask). This ordering gives large prompt-cache
 hit rates across the retry ladder, which is where most of the tokens go.
@@ -263,14 +264,15 @@ hit rates across the retry ladder, which is where most of the tokens go.
 | CLI | `typer` | — |
 | Logging | `structlog` → JSONL | Trajectory logs are eval input, so they must be structured |
 | Templates | Jinja2 with `StrictUndefined` | A missing context var must crash, not silently render empty |
-| Sandbox | Podman/Docker rootless, `--network=none` | Target env realism + containment for RE work |
-| Inference | llama.cpp `llama-server` behind `llama-swap` | OpenAI-compatible, GGUF, hot-swap, laptop-friendly |
+| Sandbox | Podman rootless, `--network=none` + egress allowlist; Proxmox QEMU VMs for target/detonation | Trust-tier isolation ([05](05-inference-and-topology.md) §1) |
+| Inference | vLLM (or SGLang) serving FP8 checkpoints on the H200 rack | Native FP8, continuous batching, prefix caching, XGrammar structured output |
 | **Not used** | LangChain, CrewAI, AutoGen, LlamaIndex | They abstract away the control flow that *is* the product |
 
-A thin `LLMProvider` interface with `local` (llama.cpp) and `anthropic`
-implementations. Runtime default is local and offline; the Anthropic path exists
-only for (a) bootstrapping fixtures during development and (b) computing a
-frontier-model ceiling on the eval suite so you know how much headroom the scaffold
+A thin `LLMProvider` interface with a `rack` (vLLM, OpenAI-compatible) and an
+`anthropic` implementation. Runtime default is the rack and fully offline; the
+Anthropic path exists only for (a) bootstrapping fixtures during development and
+(b) computing a frontier-model ceiling on the eval suite so you know how much
+headroom the scaffold
 still has. It must be impossible to enable accidentally: guarded by an explicit
 `--allow-network` flag that also flips a loud banner.
 
@@ -284,7 +286,7 @@ nightshift/
   gates/           one module per gate family; pure predicates over evidence
   runners/         build, test, coverage, mutation, lint, scan, demo, fuzz
   sandbox/         image build, exec, resource limits, seccomp profiles
-  models/          router, llama-swap config, grammar generation, cache policy
+  models/          router, vLLM client, grammar generation, cache policy
   tools/           lsp, search, docs index, patch, restricted run
   domains/         python/, cpp/, bash/, reverse_eng/, vuln_research/
   eval/            task loader, oracle runner, scorer, sweeper, reporting

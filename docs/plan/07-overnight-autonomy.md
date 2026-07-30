@@ -46,17 +46,24 @@ code, narration is the model.
 
 ## 3. Budgets
 
-Three levels, all enforced by the orchestrator:
+Three levels, all enforced by the orchestrator. Budgets are expressed primarily in
+**gate-runner wall-clock**, not tokens — inference is abundant now, so tokens are
+tracked for reporting but rarely bind ([05](05-inference-and-topology.md) §4).
 
 ```yaml
 budgets:
-  run:   { wall_hours: 9, tokens: 12_000_000 }
-  epic:  { wall_hours: 4, tokens: 4_000_000 }
-  story: { wall_minutes: 90, tokens: 800_000, attempts: 12 }
+  run:   { wall_hours: 9,  gate_minutes: 480 }
+  epic:  { wall_hours: 4,  gate_minutes: 200 }
+  story: { wall_minutes: 90, gate_minutes: 60, attempts: 12 }   # tokens: tracked, not capped
 reserve:
   report_minutes: 20      # always leave time to write the morning report
   integration_minutes: 30 # always leave time to merge + verify accepted stories
 ```
+
+`gate_minutes` is the real constraint: mutation testing, sanitizer builds, and
+from-scratch container builds dominate it. Best-of-N widens generation for free but
+must be funnelled (static pre-filter → top 1–2 into the full battery) so it doesn't
+blow the gate budget — see [05](05-inference-and-topology.md) §4.
 
 The reserve matters: an overnight run that hits the wall at 06:55 with unmerged
 work and no report is worse than one that stops at 06:15 cleanly. The scheduler
@@ -74,24 +81,34 @@ stops *starting* new stories once remaining time < reserve + median story time.
 - A run must survive a laptop sleep/wake cycle. Test this explicitly — it will
   happen.
 
-## 5. Concurrency plan for a single-GPU laptop
+## 5. Concurrency plan — inference is abundant, verification is the bottleneck
 
-The one real parallelism win: overlap LLM-bound and CPU-bound work.
+With both models resident on the rack (no swapping) and continuous batching, LLM
+calls are cheap and parallel. The scarce resource is now the **laptop's
+compile-and-test capacity** ([05](05-inference-and-topology.md) §4). Scheduling
+inverts accordingly: keep the gate runners saturated, fan out inference freely to
+feed them.
 
 ```
-Story A: RED  (llm)  ──────▶ GREEN (llm) ──────▶ [mutation, 8 min CPU] ────▶
-Story B:      [from-scratch build, 6 min CPU] ──▶ REVIEW (llm) ────────────▶
-Story C:      [fuzz campaign, 40 min CPU, background] ─────────────────────▶
+Story A: RED (llm, cheap) ─▶ GREEN gen ×N (llm, parallel) ─▶ [static filter] ─▶ [test+mutation ★]
+Story B: REVIEW (llm) ─────────────────────────────────────────────────────▶ [from-scratch build ★]
+Story C: fuzz campaign ────────────────────────────────────────────────────▶ (background, ★★)
+                                                                       ★ = scarce gate-runner slot
 ```
 
-The scheduler tags each state with `resource_class ∈ {llm, cpu, io}` and maintains
-one `llm` slot plus `min(4, ncpu/2)` `cpu` slots. Combined with swap-aware batching
-([05](05-model-serving-offline.md) §4), the practical policy is:
+The scheduler tags each state with `resource_class ∈ {llm, gate, io}`:
 
-1. Prefer running a `cpu` state over swapping models.
-2. Batch all pending states for the resident model class before swapping.
-3. Long fuzz/mutation campaigns run in a low-priority background pool with `nice`
-   and a CPU quota so they never starve the interactive path.
+1. **`llm` is not rate-limited by us** — the rack's continuous batching handles
+   concurrency. Fan out best-of-N generations and self-consistency samples freely.
+2. **`gate` slots are the throttle.** Maintain `min(ncpu/2, gate_pool)` slots across
+   the laptop and any build/test VM (Q17). A cheap static pre-filter
+   ([05](05-inference-and-topology.md) §4) culls best-of-N candidates *before* they
+   consume a scarce full-battery slot.
+3. Long fuzz/mutation campaigns run in a low-priority background pool with a CPU
+   quota so they never starve the interactive gate path.
+4. Prefer scheduling work whose next state is `gate`-bound over generating more `llm`
+   work that will only queue behind the runners — the goal is a full gate pool, not
+   a full inference queue.
 
 ## 6. Safety envelope for unattended operation
 

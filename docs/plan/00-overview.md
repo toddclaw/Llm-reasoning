@@ -8,11 +8,25 @@ security-scanned, demonstrated in the target environment, documented, CI-green.
 
 Two hard constraints shape everything:
 
-1. **No internet.** Weights, packages, container images, documentation, and eval
-   fixtures all live on the laptop.
-2. **Small models.** Qwen3-class (roughly 4B–30B, MoE with ~3B active params).
-   These models are good at *local transformation* and bad at *long-horizon
-   constraint maintenance*.
+1. **No internet, anywhere in the topology.** Weights live on an on-prem H200 rack;
+   the agents, docs corpus, and eval fixtures live on an air-gapped laptop; the
+   software under evaluation runs in isolated Proxmox VMs with no route back. See
+   [05-inference-and-topology.md](05-inference-and-topology.md) for the full picture.
+2. **Locally-hosted open models.** Qwen3.5-397B-A17B and Qwen3-Coder-Next (FP8).
+   These are frontier-class, but the design principle is unchanged and still worth
+   holding to: **reliability comes from what the harness can prove, not what the
+   model claims.** A stronger model hallucinates less often — which is exactly the
+   regime where a human stops checking and gets burned. The gates are what make the
+   output trustworthy enough to accept unseen in the morning.
+
+> **Note on the original thesis.** This plan began as a bet that a *small* local
+> model plus a rigorous external System 2 could rival a frontier model. The
+> hardware answer (A1) moved the target to frontier-class local models, so the
+> System 2 scaffold is no longer compensating for a weak base — it is buying
+> *trust*: verifiable, provenance-backed, unattended-overnight-safe output. The
+> "smaller LLM" experiment is preserved as an eval axis (run the same suite with a
+> small Qwen behind each class and measure the gap), because it's still the
+> cleanest test of how much the scaffold is worth versus the weights.
 
 And four failure modes you have already been burned by:
 
@@ -61,10 +75,13 @@ what the model claimed.
 
 ## 3. Design principles
 
-**P1 — Bounded-context calls.** Every LLM invocation must be answerable by a 30B
-model in one pass with ≲8k tokens of context and exactly one decision to make. If
-a step needs more, it is not a step; it is a plan. Context assembly is code, one
-function per role, and it is unit-tested like any other code.
+**P1 — Bounded-context calls.** Every LLM invocation is one bounded decision with
+only the context that decision needs — not because the model can't hold more (it
+can; it's a 397B), but because decomposition is what makes each step *gateable* and
+keeps the reviewer/verifier honest. The per-call context budget is a swept
+parameter, not a fixed 8k ([05](05-inference-and-topology.md) §6); the discipline is
+"one decision per call", not a token count. Context assembly is code, one function
+per role, unit-tested like any other code.
 
 **P2 — Agents are state handlers, not chatters.** No free-form agent-to-agent
 conversation. Small models thrash in open loops: they agree with each other, drift,
@@ -119,19 +136,22 @@ Three distinct things, worth separating because they have different costs:
    allowlists, output schemas, sampling parameters.
 3. **Different backend models** (expensive on a laptop). Only 1–2 models fit in
    memory at once. So roles are *routed* to a small resident set — see
-   [05-model-serving-offline.md](05-model-serving-offline.md). Design the role
+   [05-inference-and-topology.md](05-inference-and-topology.md). Design the role
    registry so each role names a **model class** (`reasoner`, `coder`, `cheap`),
    and a routing table binds classes to concrete endpoints. That way the roster is
    independent of your hardware.
 
 ## 5. Honest expectations
 
-- A Qwen3-30B-class model inside this harness will not match Opus on open-ended
-  design. It *can* match it on well-specified, gate-checkable increments, which is
-  most of a scrum backlog.
-- Throughput will be the constraint. Expect single-digit stories per night at the
-  start. The gates are expensive by design; mutation testing and best-of-N are the
-  big spends. Phase the budget deliberately.
+- The local models are frontier-class, but open-ended *design* is still the weakest
+  link — the harness gates adherence to a design, not the wisdom of it. Expect
+  strong results on well-specified, gate-checkable increments (most of a backlog)
+  and treat the Architect's output as the thing you personally review in the
+  morning. Self-consistency partially mitigates it ([03](03-verification.md) §5).
+- **The bottleneck is the laptop's compile/test throughput, not inference**
+  ([05](05-inference-and-topology.md) §4). Expect single-digit stories per night at
+  the start; the gates are expensive by design, and mutation testing plus best-of-N
+  evaluation are the big spends. Phase the budget deliberately.
 - The eval suite is not optional garnish. Without it you will tune prompts by
   anecdote and plateau. Build it in Phase 1, before most of the agents.
 - Expect the first working version to be *slow and correct*, then optimise. The

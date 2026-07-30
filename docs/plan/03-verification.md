@@ -280,8 +280,12 @@ pressure without adversarial intent, and close the obvious holes explicitly:
 Be honest about the limits so you calibrate trust:
 
 - **Whether the design is good.** Gates check adherence to a contract, not the
-  wisdom of the contract. Architect quality is the main residual risk, and it's the
-  thing to review yourself in the morning.
+  wisdom of the contract. Architect quality is the main residual risk. Because
+  inference is now abundant ([05](05-inference-and-topology.md) §4), the partial
+  mitigation is **self-consistency**: sample the Architect k times independently and
+  surface disagreement to the Manager and to you, rather than shipping one
+  unexamined design. It's cheaper than being wrong, but it is a mitigation, not a
+  gate — the design is still the thing to review yourself in the morning.
 - **Whether the feature is the right feature.** That's your Charter, and the PO
   agent only refines it.
 - **Deep semantic security.** Scanners plus fuzzing catch a class of bugs, not all
