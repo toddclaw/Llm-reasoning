@@ -1,0 +1,157 @@
+# 07 — Overnight Autonomy
+
+The goal: start it at 22:00, walk away, and at 07:00 find finished work plus an
+honest account of what didn't finish and why.
+
+The failure to avoid is not "it didn't finish everything." It's "it burned nine
+hours on one story" or "it says everything is done and it isn't."
+
+## 1. The escalation ladder
+
+Every gate failure invokes the ladder for that story. Rungs are attempted in order;
+each rung has a max-attempt count from the playbook.
+
+| Rung | Action | Default attempts | Notes |
+| ---- | ------ | ---------------- | ----- |
+| 1 | **Retry with evidence** — same role, same model, gate's `remediation` + verbatim failure output appended | 2 | Cheapest and most often sufficient. Prompt-cache friendly |
+| 2 | **Widen context** — pull in additional symbol spans, related tests, relevant docs chunks | 1 | For `CONTEXT`-shaped failures |
+| 3 | **Escalate model / search** — best-of-N candidate patches (N=4, temp 0.7) scored by the deterministic gate battery, best wins | 1 | The System-2 search rung. Expensive; this is where the token budget goes |
+| 4 | **Decompose** — Architect splits the story into smaller stories; original becomes an epic | 1 | Most effective rung for `INCOMPLETE` failures |
+| 5 | **Revisit design** — Architect reopens the ADR if a `revisit_trigger` matches | 1 | Prevents grinding against a bad contract |
+| 6 | **Park** — write a `BlockedQuestion`, release the worktree, move to the next story | — | Terminal |
+
+Rules:
+- The ladder never repeats a rung that produced an identical tree sha.
+- Rung 3 is skipped for gates whose failures are deterministic and non-searchable
+  (e.g. a missing doc file) — the playbook maps gate families to eligible rungs.
+- Total per-story attempt budget caps the whole ladder regardless of rung.
+
+## 2. Progress detectors
+
+Deterministic, running continuously in the orchestrator:
+
+| Detector | Trigger | Action |
+| -------- | ------- | ------ |
+| **Identical diff** | Two attempts produce the same tree sha | Skip to next ladder rung immediately |
+| **Oscillation** | Tree shas cycle (A→B→A) within a story | Jump to rung 4 (decompose) |
+| **Gate churn** | Same gate fails ≥3 times with the same `detail` fingerprint | Jump to rung 4; log `OSCILLATION` |
+| **No-progress** | N attempts without any new gate passing | Jump to rung 5, then park |
+| **Budget** | Story exceeds token or wall-clock budget | Park immediately |
+| **Global budget** | Run exceeds nightly budget | Finish in-flight gates, park everything else, write report |
+| **Decode-failure storm** | >X grammar failures in a window | Reduce schema depth for that role, log a runtime defect, park |
+| **Disk/RAM pressure** | Free space or RSS thresholds crossed | Pause scheduling, prune caches, warn in the report |
+
+The Scrum Master agent reads these signals; it does not produce them. Detection is
+code, narration is the model.
+
+## 3. Budgets
+
+Three levels, all enforced by the orchestrator:
+
+```yaml
+budgets:
+  run:   { wall_hours: 9, tokens: 12_000_000 }
+  epic:  { wall_hours: 4, tokens: 4_000_000 }
+  story: { wall_minutes: 90, tokens: 800_000, attempts: 12 }
+reserve:
+  report_minutes: 20      # always leave time to write the morning report
+  integration_minutes: 30 # always leave time to merge + verify accepted stories
+```
+
+The reserve matters: an overnight run that hits the wall at 06:55 with unmerged
+work and no report is worse than one that stops at 06:15 cleanly. The scheduler
+stops *starting* new stories once remaining time < reserve + median story time.
+
+## 4. Crash resumability
+
+- All state in SQLite with WAL; every transition is a transaction.
+- On startup, `nightshift run --resume <run_id>` reconciles: any story in a
+  non-terminal state with no running process is rolled back to its last passed gate
+  (git reset to that commit) and re-queued.
+- The container sandbox is stateless; orphaned containers are reaped by label.
+- The model server is supervised and restarted on crash; in-flight requests are
+  retried once, then counted as `DECODE_FAILURE`.
+- A run must survive a laptop sleep/wake cycle. Test this explicitly — it will
+  happen.
+
+## 5. Concurrency plan for a single-GPU laptop
+
+The one real parallelism win: overlap LLM-bound and CPU-bound work.
+
+```
+Story A: RED  (llm)  ──────▶ GREEN (llm) ──────▶ [mutation, 8 min CPU] ────▶
+Story B:      [from-scratch build, 6 min CPU] ──▶ REVIEW (llm) ────────────▶
+Story C:      [fuzz campaign, 40 min CPU, background] ─────────────────────▶
+```
+
+The scheduler tags each state with `resource_class ∈ {llm, cpu, io}` and maintains
+one `llm` slot plus `min(4, ncpu/2)` `cpu` slots. Combined with swap-aware batching
+([05](05-model-serving-offline.md) §4), the practical policy is:
+
+1. Prefer running a `cpu` state over swapping models.
+2. Batch all pending states for the resident model class before swapping.
+3. Long fuzz/mutation campaigns run in a low-priority background pool with `nice`
+   and a CPU quota so they never starve the interactive path.
+
+## 6. Safety envelope for unattended operation
+
+Non-negotiable defaults for an overnight run:
+
+- All execution in containers with `--network=none`. The *only* network-capable
+  process in the system is the seeding tool, run manually.
+- Agent writes are confined to the story worktree. The orchestrator's own source,
+  the playbook, `tasks_oracles/`, and the model weights are read-only mounts.
+- No pushes to any remote, ever, from an unattended run. Merges go to a local
+  integration branch only. You review and push in the morning.
+- No force-push, no history rewriting, no `git clean -x` outside a worktree.
+- Untrusted binaries (RE/VR domains) execute only in the disposable microVM path
+  with an explicit per-story flag.
+- Resource caps: per-container memory/CPU/pids limits, global disk quota for
+  evidence with LRU pruning of old runs.
+- A hard kill switch: `touch .nightshift/STOP` is checked before every transition;
+  the run drains in-flight work and writes the report.
+
+## 7. The morning report
+
+A single self-contained HTML file at `.nightshift/reports/<date>.html`, plus a
+terse terminal summary. Designed to be read in five minutes with coffee.
+
+**Section 1 — Verdict.** Stories accepted / parked / failed. Wall-clock and token
+spend. Scope of work. Toolchain and model hashes.
+
+**Section 2 — Accepted work.** Per story: the narrative, the acceptance criteria
+each mapped to its evidence, the diff stat, and **an embedded asciinema player
+showing the feature actually running**. This is the section that builds trust — you
+watch the thing work rather than reading a claim.
+
+**Section 3 — Quality dashboard.** Coverage, mutation score, complexity delta,
+review scorecards, security findings, doc gate results. Trend against previous
+nights.
+
+**Section 4 — Parked stories.** Each with exactly one crisp question and the
+context needed to answer it in under a minute. Sorted by how much work they unblock.
+*This section is the product.* An agent system that knows precisely what it doesn't
+know is far more valuable than one that guesses.
+
+**Section 5 — Process health** (Scrum Master). Where the time went, which gates
+were the bottleneck, which stories oscillated, ladder rung distribution,
+hallucinated-claim counts by role. This is your feedback loop for tuning the
+playbook.
+
+**Section 6 — Diffs and audit.** Links to branches, full event log, every Record.
+
+Rule for the report: **it never asserts anything not backed by a Record**, and every
+claim links to its evidence. The report is generated from the blackboard by code;
+the Manager agent writes only the narrative prose sections, and its output is
+subject to the same claim-stripping as any other artifact.
+
+## 8. What a good night looks like
+
+Set expectations concretely so you can tell success from failure:
+
+- 3–6 small stories accepted, or 1–2 medium ones.
+- 1–3 stories parked with genuinely good questions.
+- Zero stories that reached `ACCEPTED` and turn out to be broken when you look.
+  If this number is ever non-zero, stop adding features and fix the gate battery —
+  that's the `gate_gap` metric doing its job, and it is the only metric that can
+  destroy trust in the whole system.
