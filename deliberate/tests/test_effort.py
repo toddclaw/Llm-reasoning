@@ -25,3 +25,9 @@ def test_resolve_effort_precedence():
     assert resolve_effort("low", Effort.HIGH, Effort.MEDIUM) is Effort.LOW
     assert resolve_effort(None, Effort.HIGH, Effort.MEDIUM) is Effort.HIGH
     assert resolve_effort(None, None, Effort.MEDIUM) is Effort.MEDIUM
+
+
+def test_resolve_effort_off_is_not_treated_as_falsy():
+    # Effort.OFF == 0; an explicit off must win, not fall through to the default.
+    assert resolve_effort(None, Effort.OFF, Effort.MEDIUM) is Effort.OFF
+    assert resolve_effort("off", None, Effort.HIGH) is Effort.OFF

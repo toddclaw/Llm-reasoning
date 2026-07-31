@@ -41,8 +41,11 @@ def _interpolate(obj: Any) -> Any:
 
 class TargetSpec(BaseModel):
     name: str
-    mode: Literal["direct", "proxy"]
+    mode: Literal["direct", "proxy", "reason"]
     backend: BackendConfig
+    # only for mode: reason — the explicit pipeline to run
+    stages: list[str] = Field(default_factory=list)
+    stage_params: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class BenchConfig(BaseModel):
@@ -76,6 +79,6 @@ def load_bench_config(path: str | Path) -> BenchConfig:
 def build_runners(cfg: BenchConfig, cache: ResponseCache) -> list[Runner]:
     runners: list[Runner] = []
     for t in cfg.targets:
-        runner = build_backend_runner(t.name, t.mode, t.backend)
+        runner = build_backend_runner(t.name, t.mode, t.backend, t.stages, t.stage_params)
         runners.append(CachingRunner(runner, cache))
     return runners

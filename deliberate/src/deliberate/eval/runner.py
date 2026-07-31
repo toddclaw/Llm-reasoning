@@ -31,6 +31,7 @@ class Completion:
     usage: dict[str, Any] = field(default_factory=dict)
     latency_ms: float = 0.0
     error: str | None = None
+    confidence: float | None = None  # set by ReasonRunner when the frame stage ran
 
     @property
     def text(self) -> str:
@@ -180,15 +181,73 @@ def _completion_to_dict(c: Completion) -> dict[str, Any]:
     }
 
 
-def build_backend_runner(name: str, mode: str, backend_cfg: BackendConfig) -> Runner:
-    """Construct a Direct or Proxy runner from a backend config."""
+class ReasonRunner:
+    """Runs a fixed reasoning pipeline (Phase 2) so the harness can measure stage lift.
+
+    Unlike the server, the pipeline here is an explicit list of stage ids (not
+    classified), so an eval target pins exactly the stages under test.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        backend: Backend,
+        profile: Profile,
+        stage_ids: list[str],
+        stage_params: dict[str, dict[str, Any]] | None = None,
+        max_model_calls: int = 20,
+        max_tokens: int = 400_000,
+    ) -> None:
+        from ..reason import BackendModelClient
+        from ..reason.routing import build_stages
+
+        self.name = name
+        self.model = backend.cfg.model
+        self._backend = backend
+        self._profile = profile
+        self._stages = build_stages(stage_ids, stage_params)
+        self._make_client = lambda: BackendModelClient(backend, profile, backend.cfg.model)
+        self._budget_limits = (max_model_calls, max_tokens)
+
+    async def run(self, request: dict[str, Any], seed: int | None) -> Completion:
+        from ..reason import Budget, BudgetedClient, ReasoningState, run_pipeline
+
+        t0 = time.perf_counter()
+        rstate = ReasoningState.from_request(dict(request), effort="eval", difficulty="eval")
+        budget = Budget(max_model_calls=self._budget_limits[0], max_tokens=self._budget_limits[1])
+        client = BudgetedClient(self._make_client(), budget)
+        rstate = await run_pipeline(self._stages, rstate, client)
+        msg = rstate.answer or {}
+        finish = "tool_calls" if msg.get("tool_calls") else "stop"
+        return Completion(
+            message=msg,
+            finish_reason=finish,
+            usage={"total_tokens": budget.tokens},
+            latency_ms=(time.perf_counter() - t0) * 1000,
+            confidence=rstate.confidence,
+        )
+
+    async def aclose(self) -> None:
+        await self._backend.aclose()
+
+
+def build_backend_runner(
+    name: str,
+    mode: str,
+    backend_cfg: BackendConfig,
+    stage_ids: list[str] | None = None,
+    stage_params: dict[str, dict[str, Any]] | None = None,
+) -> Runner:
+    """Construct a Direct, Proxy, or Reason runner from a backend config."""
     backend = Backend(backend_cfg)
     if mode == "direct":
         return DirectRunner(name, backend)
+    profile = build_profile(backend_cfg.profile, ProfileConfig())
     if mode == "proxy":
-        profile = build_profile(backend_cfg.profile, ProfileConfig())
         return ProxyRunner(name, backend, profile)
-    raise ValueError(f"unknown runner mode: {mode!r} (expected 'direct' or 'proxy')")
+    if mode == "reason":
+        return ReasonRunner(name, backend, profile, stage_ids or [], stage_params)
+    raise ValueError(f"unknown runner mode: {mode!r} (expected direct|proxy|reason)")
 
 
 # Imported lazily to avoid a cycle at module import time.

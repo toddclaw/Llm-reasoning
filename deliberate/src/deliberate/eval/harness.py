@@ -49,6 +49,7 @@ async def run_suite(
                 prompt_tokens=completion.prompt_tokens,
                 completion_tokens=completion.completion_tokens,
                 cost_usd=cost_of(completion.prompt_tokens, completion.completion_tokens, price),
+                confidence=completion.confidence,
                 error=completion.error,
             )
         )

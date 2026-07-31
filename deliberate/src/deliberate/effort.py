@@ -64,5 +64,14 @@ def resolve_effort(
     suffix_effort: Effort | None,
     default: Effort,
 ) -> Effort:
-    """Apply the precedence rules to land on a single effort level."""
-    return parse_effort(field) or suffix_effort or default
+    """Apply the precedence rules to land on a single effort level.
+
+    Uses explicit ``is not None`` checks because ``Effort.OFF == 0`` is falsy — a
+    plain ``or`` chain would silently upgrade an explicit ``off`` to the default.
+    """
+    from_field = parse_effort(field)
+    if from_field is not None:
+        return from_field
+    if suffix_effort is not None:
+        return suffix_effort
+    return default

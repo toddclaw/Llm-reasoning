@@ -9,6 +9,7 @@ add pydantic-settings later if needed.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
@@ -54,11 +55,24 @@ class DefaultsConfig(BaseModel):
     reasoning_effort: Effort = Effort.MEDIUM
 
 
+class ReasoningConfig(BaseModel):
+    """Reasoning-layer config (Phase 2). Empty = defaults from reason/routing.py."""
+
+    # effort.difficulty -> ordered stage ids (overrides/extends the built-in table)
+    routes: dict[str, list[str]] = Field(default_factory=dict)
+    # per-stage params, e.g. {"best_of_n": {"n": 4}}
+    stage_params: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # per-request budget
+    max_model_calls: int = 12
+    max_tokens: int = 200_000
+
+
 class Config(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     backends: dict[str, BackendConfig]
     profiles: dict[str, ProfileConfig] = Field(default_factory=dict)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
+    reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
 
     # -- backend selection ------------------------------------------------
     def select_backend(self, model: str) -> tuple[str, BackendConfig]:

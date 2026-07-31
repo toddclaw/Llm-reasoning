@@ -1,0 +1,37 @@
+# Bench config for measuring reasoning-stage lift (Phase 2).
+#
+# Compares the raw base model against fixed reasoning pipelines, all on the same
+# upstream model, so the lift is attributable to the stages. This is how a stage
+# earns promotion to the default pipeline under the gating policy
+# (docs/deliberate/05-eval-and-roadmap.md §0): run it here, and promote only if it
+# clears the variance band on its target task class.
+#
+#   export OPENROUTER_URL="https://openrouter.ai/api/v1"
+#   export OPENROUTER_KEY="sk-or-..."
+#   deliberate bench --config bench/bench.stages.example.yaml --suite bench/tasks --out report.html
+
+targets:
+  - name: base                      # raw model, no reasoning
+    mode: direct
+    backend: { endpoint: ${OPENROUTER_URL}, model: qwen/qwen3.5-397b-a17b, api_key: ${OPENROUTER_KEY} }
+
+  - name: frame_reflect             # Inquiry & Debiasing + self-critique
+    mode: reason
+    backend: { endpoint: ${OPENROUTER_URL}, model: qwen/qwen3.5-397b-a17b, api_key: ${OPENROUTER_KEY}, profile: qwen3 }
+    stages: [frame, reflect]
+
+  - name: full                      # frame + plan-act-verify + best-of-N + reflect
+    mode: reason
+    backend: { endpoint: ${OPENROUTER_URL}, model: qwen/qwen3.5-397b-a17b, api_key: ${OPENROUTER_KEY}, profile: qwen3 }
+    stages: [frame, plan_act_verify, best_of_n, reflect]
+    stage_params:
+      best_of_n: { n: 4, temperature: 0.7 }
+
+base: base
+layer: full
+seeds: 3
+concurrency: 4
+cache_dir: .deliberate_cache
+
+pricing:
+  qwen/qwen3.5-397b-a17b: { input_per_m: 0.385, output_per_m: 2.45 }

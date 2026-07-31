@@ -26,6 +26,15 @@ from .admission import Admission, AdmissionFull
 from .backend import Backend, BackendError
 from .config import Config
 from .effort import Effort, resolve_effort, split_model_effort
+from .reason import (
+    BackendModelClient,
+    Budget,
+    BudgetedClient,
+    PipelineFactory,
+    ReasoningState,
+    classify_difficulty,
+    run_pipeline,
+)
 from .stream import synthesize_sse
 
 log = structlog.get_logger("deliberate")
@@ -46,6 +55,7 @@ class App:
         self.admission = Admission(
             config.server.max_concurrent_requests, config.server.admission_wait_s
         )
+        self.factory = PipelineFactory(config.reasoning.routes, config.reasoning.stage_params)
 
     async def aclose(self) -> None:
         for be in self.backends.values():
@@ -100,33 +110,45 @@ def build_app(config: Config) -> FastAPI:
 
         had_tools = bool(body.get("tools"))
         wants_stream = bool(body.get("stream"))
-        payload = profile.prepare_request(body, backend_cfg.model)
+
+        difficulty = classify_difficulty(body.get("messages", []), has_tools=had_tools)
+        stages = state.factory.build(effort.label, difficulty)
 
         headers = {
             "x-deliberate-effort": effort.label,
             "x-deliberate-profile": profile.name,
             "x-deliberate-backend": backend_name,
+            "x-deliberate-difficulty": difficulty,
+            "x-deliberate-stages": ",".join(s.id for s in stages) or "passthrough",
         }
 
-        # NOTE: in Phase 0 every effort level resolves to passthrough reasoning; the
-        # Qwen adaptation applies regardless of effort because it is a transport fix,
-        # not a reasoning stage. Reasoning stages arrive in Phase 2.
         try:
-            # True passthrough streaming when there are no tools to recover.
+            # --- Reasoning path (Phase 2): a non-empty pipeline for this request ---
+            if stages:
+                async with state.admission.slot():
+                    response = await _run_reasoning(
+                        body, stages, backend, profile, backend_cfg.model, config, effort.label,
+                        difficulty,
+                    )
+                if response.get("_confidence") is not None:
+                    headers["x-deliberate-confidence"] = f"{response.pop('_confidence'):.2f}"
+                else:
+                    response.pop("_confidence", None)
+                if wants_stream:
+                    return StreamingResponse(_aiter(synthesize_sse(response)),
+                                             media_type="text/event-stream", headers=headers)
+                return JSONResponse(response, headers=headers)
+
+            # --- Passthrough path (Phase 0): adapter only, no reasoning ---
+            payload = profile.prepare_request(body, backend_cfg.model)
             if wants_stream and not had_tools:
                 return await _stream_passthrough(state, backend, payload, headers)
-
-            # Otherwise call non-streaming so the adapter sees the whole message.
             async with state.admission.slot():
                 raw = await backend.chat(payload)
             adapted = profile.adapt_response(raw, had_tools=had_tools)
-
             if wants_stream:
-                return StreamingResponse(
-                    _aiter(synthesize_sse(adapted)),
-                    media_type="text/event-stream",
-                    headers=headers,
-                )
+                return StreamingResponse(_aiter(synthesize_sse(adapted)),
+                                         media_type="text/event-stream", headers=headers)
             return JSONResponse(adapted, headers=headers)
 
         except AdmissionFull as exc:
@@ -135,6 +157,33 @@ def build_app(config: Config) -> FastAPI:
             return _error(exc.status_code, exc.body, headers, raw_body=True)
 
     return api
+
+
+async def _run_reasoning(
+    body, stages, backend, profile, model, config, effort, difficulty
+) -> dict[str, Any]:
+    rstate = ReasoningState.from_request(body, effort=effort, difficulty=difficulty)
+    budget = Budget(
+        max_model_calls=config.reasoning.max_model_calls,
+        max_tokens=config.reasoning.max_tokens,
+    )
+    client = BudgetedClient(BackendModelClient(backend, profile, model), budget)
+    rstate = await run_pipeline(stages, rstate, client)
+    return _render_completion(rstate, model, budget)
+
+
+def _render_completion(rstate: ReasoningState, model: str, budget: Budget) -> dict[str, Any]:
+    message = rstate.answer or {"role": "assistant", "content": ""}
+    finish = "tool_calls" if message.get("tool_calls") else "stop"
+    return {
+        "id": "chatcmpl-deliberate",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+        "usage": {"total_tokens": budget.tokens},
+        "_confidence": rstate.confidence,
+    }
 
 
 async def _stream_passthrough(state, backend: Backend, payload, headers) -> StreamingResponse:

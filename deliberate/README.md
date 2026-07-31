@@ -30,6 +30,36 @@ Reasoning stages are **not** in Phase 0, so every effort level currently resolve
 passthrough reasoning; the Qwen adaptation applies regardless of effort because it is
 a transport fix, not a reasoning stage.
 
+## Reasoning stages (Phase 2)
+
+Beyond the transport fix, Deliberate applies composable **reasoning stages**, selected
+per request by **effort × difficulty**:
+
+- **`frame`** — *Inquiry & Debiasing* (the Kahneman pre-flight): before answering, the
+  model works out *what it needs to know* and *where it might fool itself* (substitution,
+  WYSIATI, anchoring, overconfidence, confirmation), emitting a Framing Brief with a
+  calibrated confidence and residual unknowns that grounds the answer.
+- **`plan_act_verify`** — decompose, solve stepwise, self-verify (single-turn; does not
+  drive the client's tool loop).
+- **`best_of_n`** — sample N candidates, select via a deterministic verifier (valid tool
+  call / valid JSON / consistency) or a judge model.
+- **`reflect`** — draft → critique with fresh context → revise.
+- **`passthrough`** — identity; what `effort: off` and trivial requests resolve to.
+
+A difficulty classifier + an effort×difficulty **routing table** (config) decide how much
+deliberation each request earns, so easy prompts stay fast. `effort: off` is always pure
+passthrough. Per-request **budgets** bound the work and degrade gracefully. The final
+answer comes back in the normal OpenAI shape; `x-deliberate-*` headers report the effort,
+difficulty, stages run, and the frame confidence.
+
+**Measuring stage lift.** The eval harness has a `reason` target mode that pins an explicit
+pipeline, so you can measure exactly what a stage buys and promote it under the gating
+policy only when it clears the band:
+
+```bash
+deliberate bench --config bench/bench.stages.example.yaml --suite bench/tasks --out report.html
+```
+
 ## Quickstart
 
 ```bash
@@ -139,6 +169,7 @@ src/deliberate/
   stream.py       synthesize an SSE stream from a full completion (tool-bearing requests)
   server.py       FastAPI app: /v1/chat/completions, /v1/models, /health
   cli.py          `deliberate serve|bench|version`
+  reason/         reasoning layer: state, client, pipeline, classify, routing, verifiers, stages/
   eval/           harness: task, runner, cache, graders, metrics, harness, report, runconfig
 bench/
   tasks/          starter task suite (qa, tool, structured, transparency)
