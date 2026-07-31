@@ -1,5 +1,11 @@
 # 00 — Overview, Thesis, and Principles
 
+> **Nightshift now builds on [Deliberate](../deliberate/00-overview.md), the reasoning
+> layer.** Generic reasoning, debiasing, and Qwen model-adaptation live in Deliberate;
+> Nightshift keeps the domain gates, provenance, and the scrum/investigate workflow.
+> The "System 2 in the harness, not the weights" principle below is now split across
+> both layers — see the [integration contract](../deliberate/06-nightshift-integration.md).
+
 ## 1. The problem
 
 You want to hand a scrum-team-shaped request to a set of local agents at 22:00 and
