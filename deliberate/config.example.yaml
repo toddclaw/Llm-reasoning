@@ -1,0 +1,29 @@
+# Deliberate — example deployment config (Phase 0).
+# Copy, edit, and run:  deliberate serve --config config.yaml
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  # Per-replica cap on concurrent in-flight backend calls. Size to the rack's
+  # healthy continuous-batch width; extra callers queue up to admission_wait_s.
+  max_concurrent_requests: 64
+  admission_wait_s: 30
+
+backends:
+  # The default backend. A client can address it as "base", "base:high", etc.
+  base:
+    endpoint: http://rack:8000/v1        # your vLLM (or any OpenAI-compatible) endpoint
+    model: Qwen3.5-397B-A17B-FP8         # the model id sent upstream
+    profile: qwen3
+    # api_key: sk-...                     # only if the backend requires one
+    timeout_s: 300
+
+defaults:
+  reasoning_effort: medium               # off | low | medium | high
+
+profiles:
+  qwen3:
+    recover_tool_calls: true             # recover <tool_call>...</tool_call> into tool_calls
+    tool_call_tags: [tool_call]
+    guided_json: false                   # set true to grammar-constrain response_format (vLLM)
+    # guided_decoding_backend: xgrammar

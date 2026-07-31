@@ -1,0 +1,6 @@
+# Reference qwen3 adaptation profile. Inline these values under `profiles:` in your
+# deployment config, or keep them here for documentation. Phase 0 knobs only.
+recover_tool_calls: true          # recover Hermes-style <tool_call>{...}</tool_call> from content
+tool_call_tags: [tool_call]       # tags Qwen/Hermes wrap tool calls in
+guided_json: false                # translate response_format json_schema -> vLLM guided_json
+# guided_decoding_backend: xgrammar
