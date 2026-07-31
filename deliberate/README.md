@@ -68,6 +68,24 @@ passthrough), SSE synthesis, and the server end-to-end against a mocked backend
 (passthrough, tool recovery, streaming both ways, upstream-model rewriting, error
 propagation).
 
+### Live smoke test (against a real Qwen endpoint)
+
+`scripts/live_smoke.py` runs the full adapter path against a real OpenAI-compatible
+Qwen endpoint (no server process needed; honours `HTTPS_PROXY`):
+
+```bash
+export DELIBERATE_UPSTREAM_URL="https://openrouter.ai/api/v1"   # any OpenAI-compatible base
+export DELIBERATE_UPSTREAM_MODEL="qwen/qwen3-235b-a22b"         # a Qwen-family model
+export DELIBERATE_UPSTREAM_KEY="sk-..."
+uv run python scripts/live_smoke.py
+```
+
+It checks transparency (stream + non-stream) and tool calling. **Note:** the
+`<tool_call>`-recovery path only fires when the serving stack didn't already parse
+tool calls — most hosted providers do, so recovery is best proven against your own
+vLLM started *without* `--tool-call-parser`. The script's recovery check is
+best-effort and only warns.
+
 ## Layout
 
 ```
