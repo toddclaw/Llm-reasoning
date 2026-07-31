@@ -55,11 +55,11 @@ Ordered by risk: prove the layer helps *before* building breadth.
 ### Phase 0 — Passthrough proxy
 - OpenAI-compatible server, streaming, `effort: off` = pure passthrough.
 - Qwen adapter v1: tool-format translation + grammar-constrained tool calls +
-  structured output. **This alone should noticeably fix Claude Code + Qwen.**
+  structured output. **This alone should noticeably fix pi (or Claude Code) + Qwen.**
 - Backend client + per-replica admission cap.
-- **Exit:** Claude Code driving Qwen3.5 *through* Deliberate has measurably higher
-  tool-call validity than driving vLLM directly, with no other change. Ship-worthy on
-  its own.
+- **Exit:** a pi agent driving Qwen3.5 *through* Deliberate has measurably higher
+  tool-call validity (and completes more agent tasks) than pointing pi straight at
+  vLLM, with no other change. Ship-worthy on its own.
 
 ### Phase 1 — Eval harness
 - Benchmark loader, graders, ablation runner, calibration + substitution sets,
@@ -81,10 +81,13 @@ Ordered by risk: prove the layer helps *before* building breadth.
 
 ### Phase 4 — Parallelism hardening
 - Fair queueing, priority classes, backpressure, speculative-cancel; horizontal
-  replicas; `trace_id` propagation; the thin **pi.dev adapter** (or documented
-  base_url integration).
-- **Exit:** N parallel pi.dev agents sustain high rack utilisation without tail-latency
-  collapse or cross-caller starvation, under a load test.
+  replicas; `trace_id` propagation. Integrate with **pi** primarily via `base_url`
+  ([04](04-parallelism-and-pidev.md) §4), plus optional task/priority header
+  propagation from pi-fleet if available; verify the single-turn boundary (§5) holds
+  through pi's tool loop.
+- **Exit:** a parallel pi fleet (pi-fleet / pi-orchestration across worktrees) sustains
+  high rack utilisation through Deliberate without tail-latency collapse or
+  cross-caller starvation, under a load test.
 
 ### Phase 5 — Packaging & sharing
 - `pip install deliberate`, Docker image, `deliberate serve|bench|trace`, the stage

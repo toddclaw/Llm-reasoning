@@ -20,11 +20,14 @@ client ──OpenAI /v1/chat/completions──▶  DELIBERATE  ──OpenAI─�
 Nothing about the client or the model changes. The reasoning lives **between** them,
 in a layer you can version, test, share, and reuse.
 
-## 2. Why Claude Code + Qwen3.5 underperforms — and why a layer fixes it
+## 2. Why a coding-agent harness + Qwen3.5 underperforms — and why a layer fixes it
 
-You observed Qwen3.5 doing far worse inside Claude Code than an Anthropic model
-does. That is expected, and it is not mostly a weights problem. Claude Code's harness
-is tuned end-to-end for Claude:
+You observed Qwen3.5 doing far worse inside Claude Code than an Anthropic model does.
+That is expected, and it is not mostly a weights problem: Claude Code's harness is
+tuned end-to-end for Claude. The same gap applies to **[pi](https://pi.dev/)** — the
+Claude-Code-shaped terminal agent you'd actually pair with Qwen — and Deliberate is
+the fix for exactly that pairing (see [04](04-parallelism-and-pidev.md)). The causes
+are harness-agnostic:
 
 | Root cause | What actually happens with Qwen | Layer's fix (see [03](03-qwen-adaptation.md)) |
 | ---------- | ------------------------------- | ---------------------------------------------- |
