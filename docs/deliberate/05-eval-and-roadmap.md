@@ -4,6 +4,40 @@ The layer is only worth sharing if it demonstrably improves answers. So the eval
 built early and answers one question bluntly: **does base+Deliberate beat base, by
 how much, at what latency cost, and which stages earn their keep?**
 
+## 0. Gating policy — evidence-gated defaults, ungated experiments
+
+The rule that governs what ships:
+
+> **A stage may be ON in the default pipeline (and named in any shared claim) only if
+> the benchmark shows a real, noise-clearing lift for it. Experimentation is
+> unrestricted.**
+
+Concretely:
+
+- **Default pipeline = evidence-gated.** A stage enters `pipelines/default.yaml` — the
+  pipeline you and anyone you share Deliberate with inherit — only after an ablation
+  shows its lift exceeds the variance band (§1) on the relevant task class, at an
+  acceptable latency cost. A stage that doesn't clear the bar is dropped from default
+  or left opt-in. Same discipline as the Nightshift gates: a claim needs evidence.
+- **Experiment pipelines = ungated.** Anything goes in `pipelines/experiments/*.yaml`.
+  Build a stage, wire it in, run it against your own work, iterate on intuition — no
+  benchmark required to *try* it. The bar applies to promotion, not exploration.
+- **Promotion is a diff + a number.** Moving a stage from experiment to default is a
+  config change accompanied by its benchmark result, recorded in the changelog. This
+  is what lets a shared claim ("`frame` gives +X% on knowledge QA, +Yms p50") always
+  trace to a measurement.
+- **Per-task-class, not global.** A stage can be default-on for one task class and
+  opt-in for another (e.g. `best_of_n` on by default for coding, off for chat) when
+  the evidence says so. The effort×difficulty routing table ([01](01-architecture.md)
+  §3) is where that lives.
+- **Regressions demote.** If a benchmark refresh shows a previously-promoted stage no
+  longer clears the bar (a model or profile change moved the numbers), it is demoted
+  back to opt-in. Default status is earned continuously, not once.
+
+This gives fast iteration (your experiments never wait on the harness) and a
+trustworthy shipped artifact (the defaults and the claims are always backed by a
+number). Phases 2–3 below operate under this policy.
+
 ## 1. What we measure
 
 A run is `(pipeline_config × backend_profile × benchmark) → scored results`, exactly
@@ -67,17 +101,21 @@ Ordered by risk: prove the layer helps *before* building breadth.
 - **Exit:** one command produces base-vs-layer lift with variance bars.
 
 ### Phase 2 — The reasoning stages
-- `frame` (Inquiry & Debiasing), `reflect`, `best_of_n` + verifiers,
-  `plan_act_verify`. Classifier + effort×difficulty routing table.
-- **Exit:** positive, variance-clearing `lift` on ≥3 benchmarks; `frame` shows
-  measurable calibration improvement and substitution-catch; `overthink_regression`
-  clean (easy stays easy).
+- Build `frame` (Inquiry & Debiasing), `reflect`, `best_of_n` + verifiers,
+  `plan_act_verify`, and the classifier + effort×difficulty routing table. Stages are
+  built in **experiment pipelines** (ungated, per §0) and promoted to default only as
+  they clear the bar.
+- **Exit:** each stage promoted to default shows positive, variance-clearing `lift` on
+  its target task class (§0 promotion rule); `frame` shows measurable calibration
+  improvement and substitution-catch; `overthink_regression` clean (easy stays easy).
 
 ### Phase 3 — Tuning & ablation
 - Sweep the routing table, per-stage thinking-mode, N width, context budgets, prompt
-  shims. Drop stages that don't earn their latency. Publish "which stages help, and
-  when" — the real deliverable, and what makes it credible to share.
-- **Exit:** documented, reproducible per-stage value; default pipeline chosen by data.
+  shims. Apply the §0 policy in both directions: promote what clears the bar, demote
+  what no longer does. Publish "which stages help, and when" — the real deliverable,
+  and what makes it credible to share.
+- **Exit:** documented, reproducible per-stage value; `pipelines/default.yaml` is
+  entirely evidence-backed, with each promotion traceable to its number.
 
 ### Phase 4 — Parallelism hardening
 - Fair queueing, priority classes, backpressure, speculative-cancel; horizontal
