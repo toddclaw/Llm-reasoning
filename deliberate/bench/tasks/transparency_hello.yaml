@@ -1,0 +1,11 @@
+id: transparency_hello
+kind: transparency
+difficulty: 1
+tags: [transparency, smoke]
+request:
+  messages:
+    - role: user
+      content: "Say hello in one short sentence."
+  temperature: 0
+grade:
+  type: any

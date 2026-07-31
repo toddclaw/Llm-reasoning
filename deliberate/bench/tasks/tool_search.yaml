@@ -1,0 +1,23 @@
+id: tool_search
+kind: tool
+difficulty: 2
+tags: [tool-calling]
+request:
+  messages:
+    - role: user
+      content: "Find recent papers about linear attention. Use the search tool."
+  tools:
+    - type: function
+      function:
+        name: search
+        description: Search a corpus for a query string.
+        parameters:
+          type: object
+          properties:
+            query: { type: string }
+          required: [query]
+  tool_choice: auto
+  temperature: 0
+grade:
+  type: tool_call
+  expected_name: search

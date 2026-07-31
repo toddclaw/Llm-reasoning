@@ -1,0 +1,30 @@
+id: structured_person
+kind: structured
+difficulty: 2
+tags: [structured-output]
+request:
+  messages:
+    - role: user
+      content: >
+        Extract the person as JSON with keys "name" (string) and "age" (integer):
+        "Ada Lovelace was 36 years old." Reply with only the JSON object.
+  response_format:
+    type: json_schema
+    json_schema:
+      name: person
+      schema:
+        type: object
+        properties:
+          name: { type: string }
+          age: { type: integer }
+        required: [name, age]
+        additionalProperties: false
+  temperature: 0
+grade:
+  type: json_schema
+  schema:
+    type: object
+    properties:
+      name: { type: string }
+      age: { type: integer }
+    required: [name, age]

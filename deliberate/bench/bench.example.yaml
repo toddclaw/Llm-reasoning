@@ -1,0 +1,37 @@
+# Deliberate bench run config (Phase 1).
+#
+# Compares the base model called raw ("base") against the same model through the
+# Deliberate adapter ("deliberate"). Both point at the SAME upstream model, so any
+# measured lift is the layer's doing.
+#
+# API keys come from the environment via ${VAR} — keep them out of this file:
+#   export OPENROUTER_KEY="sk-or-..."
+#   deliberate bench --config bench/bench.example.yaml --suite bench/tasks --out report.html
+#
+# NOTE: against a hosted provider that already parses tool calls, "base" and
+# "deliberate" will look identical on tool tasks (nothing to recover). To see the
+# recovery lift, point both at your own vLLM started WITHOUT --tool-call-parser.
+
+targets:
+  - name: base
+    mode: direct
+    backend:
+      endpoint: ${OPENROUTER_URL}          # e.g. https://openrouter.ai/api/v1
+      model: qwen/qwen3.5-397b-a17b
+      api_key: ${OPENROUTER_KEY}
+  - name: deliberate
+    mode: proxy
+    backend:
+      endpoint: ${OPENROUTER_URL}
+      model: qwen/qwen3.5-397b-a17b
+      api_key: ${OPENROUTER_KEY}
+      profile: qwen3
+
+base: base
+layer: deliberate
+seeds: 3
+concurrency: 4
+cache_dir: .deliberate_cache
+
+pricing:
+  qwen/qwen3.5-397b-a17b: { input_per_m: 0.385, output_per_m: 2.45 }

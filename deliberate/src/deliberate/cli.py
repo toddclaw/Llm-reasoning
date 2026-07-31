@@ -38,6 +38,58 @@ def serve(
 
 
 @app.command()
+def bench(
+    config: Path = typer.Option(..., "--config", "-c", exists=True, help="Bench run config YAML."),
+    suite: Path = typer.Option(..., "--suite", "-s", exists=True, help="Directory of task YAMLs."),
+    out: Path | None = typer.Option(None, "--out", "-o", help="Write an HTML report here."),
+    seeds: int | None = typer.Option(None, help="Override number of seeds."),
+) -> None:
+    """Run a task suite across targets and report base-vs-layer lift with a band."""
+    import asyncio
+
+    from .eval import (
+        ResponseCache,
+        compute_lift,
+        load_suite,
+        render_html,
+        render_text,
+        run_suite,
+        summarize,
+    )
+    from .eval.runconfig import build_runners, load_bench_config
+
+    cfg = load_bench_config(config)
+    if seeds is not None:
+        cfg.seeds = seeds
+    tasks = load_suite(suite)
+    cache = ResponseCache(cfg.cache_dir)
+    runners = build_runners(cfg, cache)
+
+    async def _run():
+        try:
+            return await run_suite(
+                runners, tasks, cfg.seed_list(),
+                concurrency=cfg.concurrency, pricing=cfg.pricing,
+            )
+        finally:
+            for r in runners:
+                close = getattr(r, "aclose", None)
+                if close is not None:
+                    await close()
+
+    rows = asyncio.run(_run())
+    summaries = summarize(rows)
+    pair = cfg.lift_pair()
+    lift = compute_lift(summaries, *pair) if pair else None
+
+    typer.echo(render_text(summaries, lift))
+    if out is not None:
+        meta = {"suite": str(suite), "tasks": len(tasks), "seeds": len(cfg.seed_list())}
+        out.write_text(render_html(rows, summaries, lift, meta))
+        typer.echo(f"\nwrote {out}")
+
+
+@app.command()
 def version() -> None:
     """Print the version."""
     typer.echo(__version__)

@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 *.pyc
 config.yaml
+.deliberate_cache/
+report.html

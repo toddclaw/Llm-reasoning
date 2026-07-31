@@ -1,0 +1,12 @@
+id: qa_capital
+kind: qa
+difficulty: 1
+tags: [knowledge, transparency]
+request:
+  messages:
+    - role: user
+      content: "What is the capital of Japan? Answer with just the city name."
+  temperature: 0
+grade:
+  type: contains
+  expected: "Tokyo"

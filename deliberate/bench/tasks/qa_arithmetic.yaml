@@ -1,0 +1,13 @@
+id: qa_arithmetic
+kind: qa
+difficulty: 1
+tags: [arithmetic, transparency]
+request:
+  messages:
+    - role: user
+      content: "What is 17 + 25? Reply with just the number."
+  temperature: 0
+grade:
+  type: numeric
+  expected: 42
+  tolerance: 0
