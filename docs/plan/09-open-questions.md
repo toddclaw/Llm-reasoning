@@ -137,6 +137,8 @@ tensor-parallel degree for the 397B model, how many concurrent sequences vLLM ca
 serve, and the KV budget at 128k context — which in turn sets how wide best-of-N and
 self-consistency can go. (Not blocking for Phase 0; needed to tune Phase 2 onward.)
 
+**A16. no idea. the hardware is sufficient. 
+ 
 **Q17. Where do the gate runners run?** A1 says the laptop runs "compile and test",
 but the resource inversion ([05](05-inference-and-topology.md) §4) makes compile/
 test/mutation the new bottleneck. Options: (a) laptop only; (b) a dedicated
@@ -145,17 +147,26 @@ BUILD-path gate runners on a Proxmox build VM so the laptop stays a thin front e
 and mutation/fuzzing can scale — but the target-env *demo* (G-DEMO-*) must still run
 in the isolated target VM, not the build VM. Does that split match your setup?
 
+**A17. b
+
 **Q18. Tunnel + VM lifecycle.** Are the Proxmox target VMs long-lived, or spun from
 a golden snapshot per run/per story (cleaner provenance, better isolation for
 detonation)? And is the single forwarded SSH port stable, or negotiated per run? The
 remote runner's design depends on this.
+
+**A18.  for these ecperiments, the tunnel will be stable and the qemu nodes will be stable. 
 
 **Q19. INVESTIGATE authorisation.** For RE/VR, what defines "authorised scope" in
 `scope.yaml` in practice — specific VM IDs, binary hashes, a network range? The
 Analyst's tools hard-refuse outside it, so the schema needs to match how you think
 about targets.
 
+**A19.  a network range will work. it will all be local only addresses. 
+
 **Q20. Cross-path handoff.** When an INVESTIGATE run produces a `Finding` ("the
 target parses length-prefixed frames, no bounds check at offset X"), do you want the
 system to *offer* to seed a BUILD story from it automatically, or keep the two paths
 strictly manual with you as the bridge? (Recommendation: offer, never auto-start.)
+
+**A20.  auto seed a build story. 
+
