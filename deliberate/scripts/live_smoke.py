@@ -7,8 +7,8 @@ lets the backend make real HTTPS calls upstream (honouring HTTPS_PROXY).
 
 Usage:
     export DELIBERATE_UPSTREAM_URL="https://openrouter.ai/api/v1"   # any OpenAI-compatible base
-    export DELIBERATE_UPSTREAM_MODEL="qwen/qwen3-235b-a22b"         # a Qwen-family model slug
-    export DELIBERATE_UPSTREAM_KEY="sk-..."                          # provider API key
+    export DELIBERATE_UPSTREAM_MODEL="qwen/qwen3.5-397b-a17b"       # a Qwen-family model slug
+    export DELIBERATE_UPSTREAM_KEY="sk-or-..."                       # provider API key
     python scripts/live_smoke.py
 
 What it checks:

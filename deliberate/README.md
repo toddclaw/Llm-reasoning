@@ -75,8 +75,8 @@ Qwen endpoint (no server process needed; honours `HTTPS_PROXY`):
 
 ```bash
 export DELIBERATE_UPSTREAM_URL="https://openrouter.ai/api/v1"   # any OpenAI-compatible base
-export DELIBERATE_UPSTREAM_MODEL="qwen/qwen3-235b-a22b"         # a Qwen-family model
-export DELIBERATE_UPSTREAM_KEY="sk-..."
+export DELIBERATE_UPSTREAM_MODEL="qwen/qwen3.5-397b-a17b"       # a Qwen-family model
+export DELIBERATE_UPSTREAM_KEY="sk-or-..."
 uv run python scripts/live_smoke.py
 ```
 
