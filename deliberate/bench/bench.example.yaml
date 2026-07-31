@@ -35,3 +35,4 @@ cache_dir: .deliberate_cache
 
 pricing:
   qwen/qwen3.5-397b-a17b: { input_per_m: 0.385, output_per_m: 2.45 }
+  qwen/qwen3-coder-next: { input_per_m: 0.11, output_per_m: 0.80 }

@@ -9,13 +9,18 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .runner import Completion
 from .task import GradeSpec, Task
 
 _NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+_CODE_FENCE_RE = re.compile(r"```(?:[a-zA-Z0-9_+-]*)\s*\n(.*?)```", re.DOTALL)
 
 
 @dataclass
@@ -146,6 +151,38 @@ def _grade_any(spec: GradeSpec, c: Completion) -> GradeResult:
     return GradeResult(ok, float(ok), "non-empty response" if ok else "empty response")
 
 
+def extract_code(text: str) -> str:
+    """Pull code out of a model answer: the first fenced block, else the whole text."""
+    m = _CODE_FENCE_RE.search(text)
+    return m.group(1) if m else text
+
+
+def _grade_exec(spec: GradeSpec, c: Completion) -> GradeResult:
+    """Run the model's code against tests in an isolated subprocess. Python only.
+
+    SECURITY: this executes model-generated code. It runs `python -I` (isolated) in a
+    temp dir with a wall-clock timeout — adequate for a controlled eval on your own
+    machine, NOT a hardened sandbox. Only run suites you trust.
+    """
+    if spec.language != "python":
+        return GradeResult(False, 0.0, f"exec grader supports python only, got {spec.language!r}")
+    program = "\n\n".join(p for p in (spec.setup, extract_code(c.text), spec.tests) if p)
+    with tempfile.TemporaryDirectory() as d:
+        prog = Path(d) / "prog.py"
+        prog.write_text(program)
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-I", str(prog)],
+                capture_output=True, timeout=spec.timeout_s, cwd=d,
+            )
+        except subprocess.TimeoutExpired:
+            return GradeResult(False, 0.0, f"timed out after {spec.timeout_s}s")
+        if proc.returncode == 0:
+            return GradeResult(True, 1.0, "exec passed")
+        err = proc.stderr.decode("utf-8", "replace").strip().splitlines()
+        return GradeResult(False, 0.0, f"exit {proc.returncode}: {err[-1] if err else ''}"[:200])
+
+
 _GRADERS = {
     "exact": _grade_exact,
     "contains": _grade_contains,
@@ -154,4 +191,5 @@ _GRADERS = {
     "tool_call": _grade_tool_call,
     "json_schema": _grade_json_schema,
     "any": _grade_any,
+    "exec": _grade_exec,
 }

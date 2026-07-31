@@ -143,7 +143,7 @@ LIFT (deliberate vs base): +50.0 pts (±0.0 combined band) — clears the noise 
 ```
 
 - **Tasks** are YAML (`bench/tasks/`): a request + a deterministic grade spec
-  (`numeric`, `exact`, `contains`, `regex`, `tool_call`, `json_schema`, `any`).
+  (`numeric`, `exact`, `contains`, `regex`, `tool_call`, `json_schema`, `any`, `exec`).
 - **Graders** score with checks, not opinions — including tool-call *validity* (name
   present + JSON-parseable args), the metric that captures the Qwen fix.
 - **Variance:** each task runs at N seeds; the band is the per-seed spread. `lift`
@@ -156,6 +156,25 @@ LIFT (deliberate vs base): +50.0 pts (±0.0 combined band) — clears the noise 
 **Reminder:** against a hosted provider that already parses tool calls, `direct` and
 `proxy` will tie on tool tasks (nothing to recover) — point both at a raw vLLM
 (no `--tool-call-parser`) to measure the recovery lift.
+
+### Models and suites
+
+Two rack models are wired up out of the box (both on OpenRouter, or point at your own
+vLLM):
+
+| Model | Slug | Suggested suite | Config |
+| ----- | ---- | --------------- | ------ |
+| Qwen3.5-397B-A17B | `qwen/qwen3.5-397b-a17b` | `bench/tasks` (general) | `bench.example.yaml`, `bench.stages.example.yaml` |
+| Qwen3-Coder-Next | `qwen/qwen3-coder-next` | `bench/tasks_code` (coding) | `bench.coder.example.yaml` |
+
+```bash
+# Coder-Next on coding tasks (answers graded by running the code — `exec` grader)
+deliberate bench --config bench/bench.coder.example.yaml --suite bench/tasks_code --out coder.html
+```
+
+The `exec` grader runs the model's code against hidden tests in an isolated subprocess
+with a timeout — a controlled eval on your own machine, **not** a hardened sandbox;
+only run suites you trust.
 
 ## Layout
 

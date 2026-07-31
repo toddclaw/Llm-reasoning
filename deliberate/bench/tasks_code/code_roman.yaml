@@ -1,0 +1,22 @@
+id: code_roman
+kind: code
+difficulty: 3
+tags: [coding, python]
+request:
+  messages:
+    - role: user
+      content: >
+        Write a Python function `to_roman(n)` that converts an integer between 1 and
+        3999 into its Roman numeral string (e.g. to_roman(1994) == "MCMXCIV").
+        Reply with only the code.
+  temperature: 0.2
+grade:
+  type: exec
+  language: python
+  tests: |
+    assert to_roman(1) == "I"
+    assert to_roman(4) == "IV"
+    assert to_roman(9) == "IX"
+    assert to_roman(58) == "LVIII"
+    assert to_roman(1994) == "MCMXCIV"
+    assert to_roman(3999) == "MMMCMXCIX"

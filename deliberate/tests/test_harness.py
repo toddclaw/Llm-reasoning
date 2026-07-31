@@ -111,3 +111,12 @@ def test_load_starter_suite():
     assert {"qa_arithmetic", "tool_weather", "structured_person", "transparency_hello"} <= set(by_id)
     assert by_id["tool_weather"].has_tools
     assert by_id["qa_arithmetic"].grade.type == "numeric"
+
+
+def test_load_code_suite():
+    suite_dir = Path(__file__).resolve().parent.parent / "bench" / "tasks_code"
+    tasks = load_suite(suite_dir)
+    by_id = {t.id: t for t in tasks}
+    assert {"code_fib", "code_fizzbuzz", "code_anagram", "code_roman"} <= set(by_id)
+    assert by_id["code_fib"].grade.type == "exec"
+    assert by_id["code_fib"].grade.tests is not None

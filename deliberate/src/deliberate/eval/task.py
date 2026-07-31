@@ -18,7 +18,7 @@ class GradeSpec(BaseModel):
     """How to score a completion. Deterministic graders only in Phase 1."""
 
     type: Literal[
-        "exact", "contains", "regex", "numeric", "tool_call", "json_schema", "any"
+        "exact", "contains", "regex", "numeric", "tool_call", "json_schema", "any", "exec"
     ]
     # exact / contains / regex
     expected: Any | None = None
@@ -31,6 +31,11 @@ class GradeSpec(BaseModel):
     expected_args: dict[str, Any] | None = None  # subset match against parsed args
     # json_schema (aliased so YAML can say `schema:`)
     schema_def: dict[str, Any] | None = Field(default=None, alias="schema")
+    # exec: run the model's code against tests in a subprocess
+    language: str = "python"
+    setup: str | None = None  # preamble prepended before the model's code
+    tests: str | None = None  # assertions appended after; non-zero exit = fail
+    timeout_s: float = 10.0
 
     model_config = ConfigDict(populate_by_name=True)
 

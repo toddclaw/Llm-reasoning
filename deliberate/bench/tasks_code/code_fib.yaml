@@ -1,0 +1,20 @@
+id: code_fib
+kind: code
+difficulty: 1
+tags: [coding, python]
+request:
+  messages:
+    - role: user
+      content: >
+        Write a Python function `fib(n)` that returns the nth Fibonacci number,
+        where fib(0) = 0 and fib(1) = 1. Reply with only the code.
+  temperature: 0.2
+grade:
+  type: exec
+  language: python
+  tests: |
+    assert fib(0) == 0
+    assert fib(1) == 1
+    assert fib(2) == 1
+    assert fib(10) == 55
+    assert fib(20) == 6765

@@ -1,0 +1,40 @@
+# Bench config for Qwen3-Coder-Next on coding tasks (Phase 2/3).
+#
+# Compares the raw coder model against reasoning pipelines on the coding suite, where
+# answers are graded by ACTUALLY RUNNING the code (the `exec` grader). Use with the
+# coding suite:
+#
+#   export OPENROUTER_URL="https://openrouter.ai/api/v1"
+#   export OPENROUTER_KEY="sk-or-..."
+#   deliberate bench --config bench/bench.coder.example.yaml --suite bench/tasks_code --out coder.html
+#
+# Point UPSTREAM at your own vLLM instead of OpenRouter to run it free / offline.
+# NOTE: the exec grader runs model-generated code in an isolated subprocess with a
+# timeout — fine for a controlled eval on your own machine, not a hardened sandbox.
+
+targets:
+  - name: coder                     # raw Qwen3-Coder-Next
+    mode: direct
+    backend: { endpoint: ${OPENROUTER_URL}, model: qwen/qwen3-coder-next, api_key: ${OPENROUTER_KEY} }
+
+  - name: coder_reflect             # + self-critique (drafts, critiques, revises)
+    mode: reason
+    backend: { endpoint: ${OPENROUTER_URL}, model: qwen/qwen3-coder-next, api_key: ${OPENROUTER_KEY}, profile: qwen3 }
+    stages: [reflect]
+
+  - name: coder_bestof              # + best-of-N (consistency/judge selection)
+    mode: reason
+    backend: { endpoint: ${OPENROUTER_URL}, model: qwen/qwen3-coder-next, api_key: ${OPENROUTER_KEY}, profile: qwen3 }
+    stages: [best_of_n, reflect]
+    stage_params:
+      best_of_n: { n: 5, temperature: 0.7 }
+
+base: coder
+layer: coder_bestof
+seeds: 3
+concurrency: 4
+cache_dir: .deliberate_cache
+
+pricing:
+  qwen/qwen3-coder-next: { input_per_m: 0.11, output_per_m: 0.80 }
+  qwen/qwen3.5-397b-a17b: { input_per_m: 0.385, output_per_m: 2.45 }

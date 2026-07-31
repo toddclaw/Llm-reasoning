@@ -1,4 +1,4 @@
-from deliberate.eval.graders import grade
+from deliberate.eval.graders import extract_code, grade
 from deliberate.eval.runner import Completion
 from deliberate.eval.task import GradeSpec, RequestSpec, Task
 
@@ -90,3 +90,27 @@ def test_runner_error_fails_and_marks_tool_invalid_for_tool_task():
               tools=[{"type": "function", "function": {"name": "f"}}])
     res = grade(t, Completion.errored("boom", 0.0))
     assert not res.passed and res.tool_call_valid is False
+
+
+def test_extract_code_from_fence_or_plain():
+    assert extract_code("```python\ndef f(): return 1\n```").strip() == "def f(): return 1"
+    assert extract_code("def g(): return 2").strip() == "def g(): return 2"
+
+
+def test_exec_grader_passes_correct_code():
+    t = _task({"type": "exec", "tests": "assert fib(10) == 55\nassert fib(0) == 0"})
+    code = "```python\ndef fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```"
+    res = grade(t, _text(code))
+    assert res.passed, res.detail
+
+
+def test_exec_grader_fails_wrong_code():
+    t = _task({"type": "exec", "tests": "assert add(2, 2) == 4"})
+    res = grade(t, _text("def add(a, b):\n    return a - b"))
+    assert not res.passed
+
+
+def test_exec_grader_reports_timeout():
+    t = _task({"type": "exec", "tests": "loop()", "timeout_s": 1})
+    res = grade(t, _text("def loop():\n    while True:\n        pass"))
+    assert not res.passed and "timed out" in res.detail
