@@ -100,10 +100,11 @@ The scheduler tags each state with `resource_class ∈ {llm, gate, io}`:
 
 1. **`llm` is not rate-limited by us** — the rack's continuous batching handles
    concurrency. Fan out best-of-N generations and self-consistency samples freely.
-2. **`gate` slots are the throttle.** Maintain `min(ncpu/2, gate_pool)` slots across
-   the laptop and any build/test VM (Q17). A cheap static pre-filter
-   ([05](05-inference-and-topology.md) §4) culls best-of-N candidates *before* they
-   consume a scarce full-battery slot.
+2. **`gate` slots are the throttle.** They live on the Proxmox build VM (A17), not
+   the laptop; the host-side broker load-balances jobs across however many build VMs
+   exist (scaling is a provisioning decision). A cheap static pre-filter runs in the
+   agent container and culls best-of-N candidates *before* they consume a scarce
+   build-VM slot ([05](05-inference-and-topology.md) §4).
 3. Long fuzz/mutation campaigns run in a low-priority background pool with a CPU
    quota so they never starve the interactive gate path.
 4. Prefer scheduling work whose next state is `gate`-bound over generating more `llm`
@@ -114,15 +115,19 @@ The scheduler tags each state with `resource_class ∈ {llm, gate, io}`:
 
 Non-negotiable defaults for an overnight run:
 
-- All execution in containers with `--network=none`. The *only* network-capable
-  process in the system is the seeding tool, run manually.
+- The agent container has no internet, no host fs, and no SSH keys — only the
+  rack + broker tunnels on its egress allowlist ([05](05-inference-and-topology.md)
+  §1). Build/test runs on the build VM and demos on the target VM, both local-net
+  only; the *only* internet-capable step in the whole system is manual seeding.
 - Agent writes are confined to the story worktree. The orchestrator's own source,
   the playbook, `tasks_oracles/`, and the model weights are read-only mounts.
-- No pushes to any remote, ever, from an unattended run. Merges go to a local
+- **No pushes to any remote, ever** — the container has no SSH keys, so this is
+  structural, not a policy (A4). Agents *do* create commits; merges go to a local
   integration branch only. You review and push in the morning.
 - No force-push, no history rewriting, no `git clean -x` outside a worktree.
-- Untrusted binaries (RE/VR domains) execute only in the disposable microVM path
-  with an explicit per-story flag.
+- Untrusted binaries (RE/VR) execute only in a Proxmox target VM with no route back
+  to the laptop or the build VM, and only within the authorised `scope.yaml` CIDR
+  (A19), enforced by the host-side broker.
 - Resource caps: per-container memory/CPU/pids limits, global disk quota for
   evidence with LRU pruning of old runs.
 - A hard kill switch: `touch .nightshift/STOP` is checked before every transition;
@@ -149,6 +154,14 @@ nights.
 context needed to answer it in under a minute. Sorted by how much work they unblock.
 *This section is the product.* An agent system that knows precisely what it doesn't
 know is far more valuable than one that guesses.
+
+**Section 4b — Seeded from findings** (when an INVESTIGATE run ran). BUILD stories
+auto-created from verified findings (A20), each linked to its `Finding` and evidence,
+enabled by default but listed here for your veto before the next run — see
+[10](10-dual-path-and-existing-repos.md) §1a. On the INVESTIGATE path this section is
+replaced by the **Answers** (each `Question` mapped to its findings + evidence) and
+the **Unknowns** (what could not be determined, and what data would settle it — the
+analysis-side analogue of a parked question).
 
 **Section 5 — Process health** (Scrum Master). Where the time went, which gates
 were the bottleneck, which stories oscillated, ladder rung distribution,

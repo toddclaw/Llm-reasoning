@@ -7,50 +7,75 @@ Revised after A1/A2/A4. This is no longer a single-laptop design.
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
 │ AGENT CONTAINER  (podman, rootless)                                   │
-│   nightshift orchestrator, agents, gates, tool layer                  │
+│   nightshift orchestrator, agents, tool layer, gate LOGIC (pure)      │
 │   mounts: /work (project volume, rw), docs corpus (ro)                │
 │   NO ssh keys.  NO host fs beyond the mount.  NO oracle mounts.       │
-│   egress allowlist:  rack:8000 (vLLM)  +  host:PORT (target tunnel)   │
+│   egress allowlist:  rack:8000 (vLLM)  +  host:PORT (tunnels)         │
 └──────────┬─────────────────────────────────┬──────────────────────────┘
-           │ LAN / https                     │ localhost:PORT
+           │ LAN / https                     │ localhost:PORTs
            ▼                                 ▼
 ┌────────────────────────┐        ┌──────────────────────────────────────┐
-│ H200 RACK              │        │ LAPTOP HOST                          │
-│  vLLM: Qwen3.5-397B    │        │  owns ssh keys + tunnel              │
-│        -A17B-FP8       │        │  runs build/test runners             │
-│  vLLM: Qwen3-Coder-    │        │  holds attestation key               │
-│        Next-FP8        │        │  owns git remote credentials         │
+│ H200 RACK              │        │ LAPTOP HOST  (thin front end)        │
+│  vLLM: Qwen3.5-397B    │        │  owns ssh keys + tunnels             │
+│        -A17B-FP8       │        │  holds attestation key               │
+│  vLLM: Qwen3-Coder-    │        │  owns git remote credentials         │
+│        Next-FP8        │        │  runs the remote-runner broker only  │
 │  + judge / cheap /embed│        └──────────────┬───────────────────────┘
-└────────────────────────┘                       │ ssh tunnel, one port
-                                                 ▼
-                                  ┌──────────────────────────────────────┐
-                                  │ PROXMOX  (target environment)        │
-                                  │  QEMU VMs, virtual networking        │
-                                  │  runs software under evaluation      │
-                                  │  ✗ no route back to laptop           │
-                                  └──────────────────────────────────────┘
+└────────────────────────┘                       │ ssh tunnels (stable ports)
+                              ┌──────────────────┴──────────────────┐
+                              ▼                                     ▼
+              ┌──────────────────────────────┐      ┌──────────────────────────────┐
+              │ PROXMOX · BUILD/TEST VM      │      │ PROXMOX · TARGET VM(s)       │
+              │  gate runners: compile,      │      │  software under evaluation   │
+              │  test, coverage, mutation,   │      │  RE/VR detonation            │
+              │  lint, scan, from-scratch    │      │  G-DEMO-* runs HERE          │
+              │  build   (A17: option b)     │      │  ✗ no route back to laptop   │
+              │  local-net only, no internet │      │  local-net only              │
+              └──────────────────────────────┘      └──────────────────────────────┘
 ```
 
-Three trust tiers, each a real boundary:
+Four trust tiers (A17 split the runners off the laptop onto a dedicated Proxmox
+build/test VM, keeping the laptop a thin front end):
 
 | Tier | Trusts | Holds | Cannot |
 | ---- | ------ | ----- | ------ |
-| Agent container | nothing | agent code, project volume | reach the internet, reach host fs, push to git, ssh anywhere |
+| Agent container | nothing | agent code, project volume | reach internet, reach host fs, push to git, ssh anywhere |
 | Laptop host | itself | ssh keys, attestation key, git creds | — |
-| Target VMs | nothing | software under evaluation, detonated samples | reach back to the laptop |
+| Build/test VM | the project tree | toolchains, test/mutation/scan runners | reach the internet; reach the target VMs |
+| Target VM(s) | nothing | software under evaluation, detonated samples | reach back to the laptop or the build VM |
 
-The one-way network into the target is a gift: it makes RE/VR detonation genuinely
-safe in a way seccomp profiles never quite are. The plan leans on it.
+Two isolation properties the topology gives us for free:
 
-**Evidence flows by pull, never push.** Target VMs cannot initiate anything. The
-laptop-side runner invokes over the tunnel, captures stdout/exit/artifacts, and
-attests them **on the laptop**. The attestation key never enters the container or a
-target VM, so the provenance guarantee (P3) holds across the whole topology.
+- **The one-way network into the target VMs** makes RE/VR detonation genuinely safe
+  in a way seccomp profiles never quite are. The plan leans on it.
+- **The build/test VM is separated from the target VM.** Build-time compromise (a
+  malicious `Makefile`, a hostile test dependency) cannot reach the software under
+  evaluation, and target detonation cannot poison the build. G-DEMO-* deliberately
+  runs in the *target* VM, not the build VM, so "it works" is proven where it must
+  actually run — never on the machine that built it.
 
-**Agents never hold SSH.** The tunnel is established by the host before the run and
-exposed to the container as a single forwarded port. The agent-facing tool is
-`run_in_target(cmd, vm)` — allowlisted per role, routed through the harness's remote
-runner, which is the only component that speaks the transport.
+**Evidence flows by pull, and is attested on the host.** Neither the build VM nor
+the target VMs can initiate anything toward the laptop. The host-side **remote-runner
+broker** invokes over a stable tunnel (A18), captures `stdout/exit/artifacts`, and
+**attests them on the host** with a key that never leaves it. So even though the
+runners now live on the build VM, a `Record`'s provenance is still minted in the one
+tier that holds the key — the build VM produces *output*, the host turns output into
+*attested evidence*. P3 holds across all four tiers.
+
+**Stable tunnels and stable VMs (A18).** For these experiments the SSH tunnel and the
+QEMU nodes are long-lived and stably addressed, which simplifies the remote runner
+(no per-run port negotiation, no snapshot-spin lifecycle). The tradeoff is that
+long-lived VMs don't give fresh-per-run isolation, so **every Record captures the
+target/build VM identity and a state fingerprint** (VM id + a recorded snapshot/boot
+id) for reproducibility. Where a story needs guaranteed-clean state — cold-start
+demos (G-DEMO-3), detonation — the runner reverts the VM to a named snapshot first
+and records the snapshot id. Moving to spin-per-story snapshots later is a
+runner-internal change, not an architecture change.
+
+**Agents never hold SSH.** The tunnels are established by the host before the run and
+exposed to the container as forwarded ports. The agent-facing tools are
+`run_in_build(cmd)` and `run_in_target(cmd, vm)` — allowlisted per role, routed
+through the broker, which is the only component that speaks the transport.
 
 ## 2. Inference stack — vLLM, not llama.cpp
 
@@ -108,24 +133,31 @@ even when weights are shared.
 On a laptop, inference was scarce and verification was comparatively cheap. That is
 now reversed:
 
-> **Inference is abundant. The laptop's compile-and-test capacity is the bottleneck.**
+> **Inference is abundant. The build/test VM's throughput is the bottleneck.**
 
-Scheduling and budgets flip accordingly:
+The runners live on a dedicated Proxmox build VM (A17), so the scarce resource is
+that VM's CPU, not the laptop's — but the inversion is the same, and scheduling and
+budgets flip accordingly:
 
-- **Token budgets stop binding.** Laptop wall-clock becomes the scheduled resource.
-  Budgets in [07](07-overnight-autonomy.md) are re-expressed in laptop-CPU-minutes;
-  tokens are tracked but rarely limiting.
+- **Token budgets stop binding.** Gate-runner wall-clock becomes the scheduled
+  resource. Budgets in [07](07-overnight-autonomy.md) are re-expressed in
+  gate-runner-minutes; tokens are tracked but rarely limiting.
+- **The build VM can be sized/scaled independently.** Because it's a Proxmox VM, more
+  vCPUs (or a second build VM behind the broker) is a provisioning decision, not a
+  hardware purchase — a real advantage of A17 over laptop-only runners. The broker
+  load-balances gate jobs across whatever build VMs exist.
 - **Best-of-N has a new cost model.** Generating 8 candidate patches is nearly free;
   *evaluating* 8 through the gate battery costs 8× the scarcest resource. So
   candidates run through a two-stage funnel:
 
   | Stage | Runs on | Cost | Applied to |
   | ----- | ------- | ---- | ---------- |
-  | 1. Static filter — parse, type-check, LSP symbol resolution, lint, AST vacuity | container CPU, parallel | seconds | all N candidates |
-  | 2. Full battery — unit tests, coverage, mutation, sanitizers, from-scratch build | laptop / build VM | minutes | top 1–2 survivors |
+  | 1. Static filter — parse, type-check, LSP symbol resolution, lint, AST vacuity | agent container CPU, parallel | seconds | all N candidates |
+  | 2. Full battery — unit tests, coverage, mutation, sanitizers, from-scratch build | build VM | minutes | top 1–2 survivors |
 
-  Stage 1 is where G-GREEN-5 earns its keep twice: a correctness gate *and* a nearly
-  free candidate ranker.
+  Stage 1 runs in the agent container (it's pure static analysis, no execution) so
+  it doesn't consume a scarce build-VM slot; G-GREEN-5 earns its keep twice here — a
+  correctness gate *and* a nearly free candidate ranker.
 - **Self-consistency is cheap; spend it where verification cannot reach.** For
   decisions no gate can check — architecture choices, story decomposition, RE
   triage calls — sample k times independently and take consensus, surfacing
@@ -134,9 +166,8 @@ Scheduling and budgets flip accordingly:
   buy. It is also the honest answer to "who checks the Architect", which
   [03](03-verification.md) §5 previously listed as an ungated residual risk.
 - **Mutation testing and fuzzing become the dominant wall-clock costs.** Both are
-  embarrassingly parallel and neither needs the laptop specifically. A dedicated
-  build/test VM on the Proxmox host, or spare rack CPU, is the obvious relief valve
-  — raised as Q17.
+  embarrassingly parallel and run in a low-priority pool on the build VM (fuzzing
+  may warrant its own VM so a long campaign never starves interactive gates).
 
 ## 5. Prompt cache discipline (unchanged, now worth more)
 
@@ -193,11 +224,12 @@ with a trusted LAN to the rack. Seeding happens once from a networked machine.
 | Item | Destination | Notes |
 | ---- | ----------- | ----- |
 | Model weights (FP8) | rack | manifest + sha256, recorded in every report |
-| Python deps | laptop + agent image | `uv pip download` wheelhouse, `--offline --find-links` |
+| Python deps | agent image + build VM | `uv pip download` wheelhouse, `--offline --find-links` |
+| Toolchains (gcc/g++/cmake/ninja, test/mutation/scan tools) | **build VM** | this is where compile/test/mutation run (A17) |
 | Container images | laptop | `podman save` / `load` tarballs |
-| Proxmox VM templates | proxmox host | golden images per target env, with named snapshots |
+| Proxmox VM templates | proxmox host | golden images for build VM and each target env, with named snapshots |
 | Docs corpus | agent container (ro) | cppreference, Python docs, man pages, C/C++ standards |
-| RE/VR tooling | agent container + VM templates | Ghidra, rizin, capa rules, semgrep rules, AFL++, angr |
+| RE/VR tooling | agent container (static) + target VM templates (dynamic) | Ghidra, rizin, capa rules, semgrep rules, AFL++, angr |
 | Advisory DB snapshot | agent container | dependency vulnerability checks |
 | Eval fixtures | laptop | seed repos as git bundles; oracles never mounted into the container |
 

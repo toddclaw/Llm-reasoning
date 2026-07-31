@@ -49,8 +49,33 @@ nightshift analyze  --target te-vm-03 --questions ./questions.yaml
   wrapper script or a future UI sets it without CLI flags.
 - A single project may have runs of both kinds over its life (build a tool, then
   investigate with it). They share the blackboard, so a `Finding` from an
-  investigate run can seed a story in a later build run — the natural workflow for
-  "I learned X about the target, now build a tool that exploits X".
+  investigate run **auto-seeds a BUILD story** — see §1a.
+
+## 1a. Cross-path auto-seeding (A20)
+
+When an INVESTIGATE run produces a verified `Finding` with build implications ("the
+target parses length-prefixed frames with no bounds check at offset X"), the system
+**automatically creates a BUILD story** from it rather than waiting for you to bridge
+the two paths by hand. The mechanics keep this safe:
+
+- The seeded story enters the BUILD backlog at `INTAKE` as a normal story, carrying a
+  `derived_from: <finding_id>` provenance link. It is **not** silently implemented —
+  it flows through the full state machine (PO shaping, Architect, gates) like any
+  other story.
+- It is created **proposed/enabled by default** but flagged in the morning report's
+  "seeded from findings" section, so under the review-and-answer operating model
+  (A10) you see every auto-seeded story and can deprioritise or kill it before the
+  next night's run.
+- The `Finding`'s evidence (the reproduction script, the sanitizer trace) is attached
+  to the story, so the TDD Dev starts with a *failing test derived from the PoC* —
+  the cleanest possible RED for a "build a tool / fix that handles X" story.
+- Only **verified** findings (reproduced by the Verifier, §2) can seed a story. An
+  unverified hypothesis cannot spawn build work — the same provenance gate as
+  everywhere else, so auto-seeding never launders a guess into a task.
+
+This is the workflow you described: "I learned X about the target, now build a tool
+that interacts with / hardens against X", made automatic without losing the audit
+trail or your morning veto.
 
 ## 2. The INVESTIGATE path state machine
 
@@ -64,7 +89,7 @@ POSED ──▶ SCOPED ──▶ PLANNED ──▶ COLLECTED ──▶ ANALYZED 
 | State | Handler | Produces | Gate (representative) |
 | ----- | ------- | -------- | --------------------- |
 | POSED | human | `Question` (what we want to know, what would count as an answer) | question has a stated acceptance-of-answer condition |
-| SCOPED | Analyst | `Scope` (which artifacts/VMs/binaries are in bounds) | scope ⊆ authorised `scope.yaml`; nothing out of bounds |
+| SCOPED | Analyst | `Scope` (which VMs / addresses / binaries are in bounds) | scope ⊆ authorised `scope.yaml`; nothing out of bounds |
 | PLANNED | Analyst | `InvestigationPlan` (steps, each producing a named datum) | every step names the evidence it will yield |
 | COLLECTED | harness runner | `Evidence` records (tool output, traces, dumps) — **attested** | each datum attested, tree/target-bound |
 | ANALYZED | Analyst | `Finding[]` (claim + cited evidence + reasoning) | every claim cites ≥1 attested Evidence id |
@@ -90,7 +115,7 @@ The load-bearing states are **COLLECTED** and **VERIFIED**:
 
 ```
 Question:        text, why_it_matters, answer_acceptance (what evidence would settle it)
-Scope:           targets[], binaries[], vms[], explicitly_out_of_bounds[]
+Scope:           allowed_cidrs[], vms[], binaries[], explicitly_out_of_bounds[]
 InvestigationPlan: steps[{intent, method, produces_datum}]
 Evidence:        record_id, method, cmd, target, output_sha, attestation   # harness-written
 Finding:         claim, confidence, cites:[evidence_id], reasoning, reproduction_script_ref
@@ -101,6 +126,27 @@ AnalysisReport:  narrative, findings[], evidence_index, scope_statement, unknown
 `Finding.confidence` is not the model's vibe — it is a function of how many
 independent Evidence records corroborate it and whether Verification reproduced it.
 Computed by code from the evidence graph, not asserted by the Analyst.
+
+### Scope enforcement (A19)
+
+Scope is defined by a **local-only network range**, which matches how the targets are
+addressed. The remote-runner broker refuses any `run_in_target` whose destination
+falls outside the allowed CIDRs, and refuses any destination that isn't
+RFC-1918/local — a belt-and-braces guard against an analysis script trying to reach
+off-network:
+
+```yaml
+# scope.yaml
+allowed_cidrs: [ 10.20.0.0/24 ]     # the target VMs' local segment
+require_local_only: true            # reject anything outside RFC-1918 / link-local
+vms:      [ te-vm-03, te-vm-04 ]    # optional allowlist by VM id, within the CIDRs
+binaries: [ "sha256:…" ]            # optional: pin which samples are in-bounds
+explicitly_out_of_bounds: [ 10.20.0.1 ]   # e.g. the gateway
+```
+
+Enforcement is in the broker (host tier), not in the agent, so a compromised or
+confused agent cannot widen its own scope — the same principle as the agent
+container's egress allowlist.
 
 ### INVESTIGATE gates (F1–F4 analogues)
 

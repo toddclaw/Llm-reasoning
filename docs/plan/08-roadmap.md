@@ -31,14 +31,16 @@ Deliverables:
   we hold ourselves to the standard we're enforcing).
 - **Topology bring-up** ([05](05-inference-and-topology.md) §1): vLLM on the rack
   serving both FP8 checkpoints resident; agent container with the egress allowlist
-  (rack + tunnel only) and a test asserting nothing else is reachable; the
-  host-owned SSH tunnel to a Proxmox target VM exposed as one forwarded port.
+  (rack + tunnels only) and a test asserting nothing else is reachable; the
+  host-owned remote-runner broker with stable tunnels (A18) to a Proxmox **build VM**
+  (gate runners live here, A17) and a Proxmox **target VM**.
 - Model layer: OpenAI-compatible client to vLLM, **grammar generation from pydantic
   schemas** via `guided_json`, deterministic sampling profile, prefix-cache-friendly
   prompt layout with a stability regression test.
-- Provenance: attestation key held on the host; the laptop-side remote runner that
-  executes in the target over the tunnel and attests results (evidence flows by
-  pull, never push).
+- Provenance: attestation key held on the host; the remote-runner broker executes on
+  the build VM / target VM over the stable tunnels and attests results **on the host**
+  (evidence flows by pull, never push); every Record captures the VM identity + state
+  fingerprint (A18).
 - Blackboard: SQLite schema, artifact/record models, attestation verification.
 - Two runners: `test` (pytest) and `lint`.
 - One agent (`tdd-dev:impl`), one state transition, one gate (`G-GREEN-1`).
@@ -49,10 +51,11 @@ Deliverables:
   offline, with a `TestRunRecord` attested on the host.
 - The agent container provably cannot reach the internet, the host filesystem, git
   push, or ssh — asserted by tests.
-- A target VM cannot initiate a connection back to the laptop — asserted by a test.
-- Measured: rack tokens/sec under concurrency, and **laptop/VM gate-runner
-  throughput** (compile, test, mutation wall-clock). These set every budget, so get
-  them early — the gate runner is the bottleneck now, not inference.
+- Neither the build VM nor a target VM can initiate a connection back to the laptop,
+  and the build VM cannot reach the target VM — asserted by tests.
+- Measured: rack tokens/sec under concurrency, and **build-VM gate-runner throughput**
+  (compile, test, mutation wall-clock). These set every budget, so get them early —
+  the build VM is the bottleneck now, not inference.
 
 ---
 
@@ -149,8 +152,12 @@ of your two real workloads to need C/C++.
 Deliverables:
 - **INVESTIGATE state machine** (`POSED→…→ANSWERED`) and roster (Analyst, Verifier,
   Reporter, Manager) over the shared runtime — [10](10-dual-path-and-existing-repos.md).
-- `--path investigate` selection, `scope.yaml` enforcement, `Question`/`Evidence`/
-  `Finding`/`Verification`/`AnalysisReport` artifacts.
+- `--path investigate` selection; `scope.yaml` enforcement by **local-only CIDR**
+  (A19) in the broker; `Question`/`Evidence`/`Finding`/`Verification`/`AnalysisReport`
+  artifacts.
+- **Cross-path auto-seeding** (A20): a verified `Finding` auto-creates a
+  provenance-linked BUILD story (at `INTAKE`, PoC attached as the RED seed), flagged
+  in the morning report for your veto — [10](10-dual-path-and-existing-repos.md) §1a.
 - C/C++ analysis toolchain in the agent image and target VM templates: Ghidra
   headless, rizin/r2pipe, capa, angr, gdb/pwndbg, objdump/readelf.
 - **Script-produces-evidence discipline**: Analyst emits scripts, harness runs them
@@ -169,8 +176,10 @@ Deliverables:
 - RE: recovers the target algorithm with a passing differential test on ≥60% of RE
   tasks.
 - VR: finds ≥70% of planted bugs with a working PoC, false-positive rate ≤20%.
-- Confirmed: a target VM cannot initiate a connection to the laptop, under
-  adversarial review.
+- A verified finding auto-seeds a BUILD story that appears in the morning report with
+  its evidence attached and is vetoable before the next run.
+- Confirmed under adversarial review: a target VM cannot initiate a connection to the
+  laptop, and scope enforcement rejects any out-of-CIDR / non-local destination.
 
 ---
 
