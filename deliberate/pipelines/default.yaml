@@ -1,0 +1,38 @@
+# Default effort × difficulty routing table.
+#
+# This mirrors reason/routing.py:DEFAULT_ROUTES and is the file the gating policy
+# governs (docs/deliberate/05-eval-and-roadmap.md §0): a stage may appear here only
+# once a sweep shows it clears the noise band on the relevant task class. Until you
+# run `deliberate sweep` against your model, treat this as the *starting* table — the
+# conservative defaults, not yet evidence-backed. Promote/demote entries from sweep
+# results and record the number in the commit that changes them.
+#
+# To use: paste under `reasoning.routes` in your server config, or edit
+# reason/routing.py. `off` and `trivial` always resolve to passthrough.
+
+reasoning:
+  routes:
+    off.trivial: []
+    off.moderate: []
+    off.hard: []
+
+    low.trivial: []
+    low.moderate: [frame, reflect]
+    low.hard: [frame, reflect]
+
+    medium.trivial: []
+    medium.moderate: [frame, reflect]
+    medium.hard: [frame, plan_act_verify, reflect]
+
+    high.trivial: [frame, reflect]
+    high.moderate: [frame, best_of_n, reflect]
+    high.hard: [frame, plan_act_verify, best_of_n, reflect]
+
+  stage_params:
+    best_of_n: { n: 4, temperature: 0.7, selector: auto }
+    reflect: { rounds: 1 }
+    plan_act_verify: { max_steps: 6 }
+
+  # Per-request budget (degrades gracefully to best-answer-so-far when hit).
+  max_model_calls: 12
+  max_tokens: 200000

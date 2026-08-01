@@ -1,0 +1,42 @@
+# Sweep / ablation spec (Phase 3).
+#
+# Measures the marginal value of each reasoning stage so you can promote to the
+# default only what clears the noise band (docs/deliberate/05-eval-and-roadmap.md §0).
+#
+#   export OPENROUTER_URL="https://openrouter.ai/api/v1"
+#   export OPENROUTER_KEY="sk-or-..."
+#   deliberate sweep --config bench/sweep.example.yaml --out sweep.html
+#
+# Point `backend.endpoint` at your own vLLM to run it free / offline.
+
+suite: bench/tasks
+backend:
+  endpoint: ${OPENROUTER_URL}
+  model: qwen/qwen3.5-397b-a17b
+  api_key: ${OPENROUTER_KEY}
+  profile: qwen3
+
+# Every variant is lifted against this baseline (the raw model, no reasoning).
+baseline_mode: direct
+baseline_name: base
+
+seeds: 3
+concurrency: 4
+cache_dir: .deliberate_cache
+
+# Expand the full pipeline into build-up (prefixes) + leave-one-out variants,
+# so each stage's marginal contribution is visible both ways.
+ablation: [frame, plan_act_verify, best_of_n, reflect]
+
+# You can also add explicit variants and/or a parameter grid:
+# variants:
+#   - { name: frame_only, stages: [frame] }
+# grid:
+#   stage: best_of_n
+#   param: n
+#   values: [1, 3, 5, 8]
+#   base_stages: [best_of_n, reflect]
+
+pricing:
+  qwen/qwen3.5-397b-a17b: { input_per_m: 0.385, output_per_m: 2.45 }
+  qwen/qwen3-coder-next: { input_per_m: 0.11, output_per_m: 0.80 }

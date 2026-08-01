@@ -90,6 +90,30 @@ def bench(
 
 
 @app.command()
+def sweep(
+    config: Path = typer.Option(..., "--config", "-c", exists=True, help="Sweep spec YAML."),
+    out: Path | None = typer.Option(None, "--out", "-o", help="Write an HTML report here."),
+    seeds: int | None = typer.Option(None, help="Override number of seeds."),
+) -> None:
+    """Sweep pipeline variants / ablations and report which stages earn their place."""
+    import asyncio
+
+    from .eval.report import render_sweep_html, render_sweep_text
+    from .eval.sweep import load_sweep_spec, run_sweep
+
+    spec = load_sweep_spec(config)
+    if seeds is not None:
+        spec.seeds = seeds
+    rows, summaries, analysis = asyncio.run(run_sweep(spec))
+    typer.echo(render_sweep_text(summaries, analysis))
+    if out is not None:
+        meta = {"suite": spec.suite, "model": spec.backend.model,
+                "variants": len(analysis.variants), "seeds": len(spec.seed_list())}
+        out.write_text(render_sweep_html(rows, summaries, analysis, meta))
+        typer.echo(f"\nwrote {out}")
+
+
+@app.command()
 def version() -> None:
     """Print the version."""
     typer.echo(__version__)

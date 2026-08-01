@@ -14,13 +14,17 @@ from .harness import run_suite
 from .metrics import (
     Lift,
     Row,
+    SweepAnalysis,
     TargetSummary,
+    VariantVerdict,
+    analyze_sweep,
     brier_score,
     compute_lift,
     expected_calibration_error,
     summarize,
 )
-from .report import render_html, render_text
+from .report import render_html, render_sweep_html, render_sweep_text, render_text
+from .sweep import SweepSpec, load_sweep_spec, run_sweep
 from .runner import (
     Completion,
     DirectRunner,
@@ -39,13 +43,21 @@ __all__ = [
     "run_suite",
     "Lift",
     "Row",
+    "SweepAnalysis",
     "TargetSummary",
+    "VariantVerdict",
+    "analyze_sweep",
     "brier_score",
     "compute_lift",
     "expected_calibration_error",
     "summarize",
     "render_html",
+    "render_sweep_html",
+    "render_sweep_text",
     "render_text",
+    "SweepSpec",
+    "load_sweep_spec",
+    "run_sweep",
     "Completion",
     "DirectRunner",
     "ProxyRunner",

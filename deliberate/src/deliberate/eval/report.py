@@ -10,7 +10,7 @@ from __future__ import annotations
 import html
 from typing import Any
 
-from .metrics import Lift, Row, TargetSummary
+from .metrics import Lift, Row, SweepAnalysis, TargetSummary
 
 
 def _pct(x: float | None) -> str:
@@ -41,6 +41,105 @@ def render_text(summaries: dict[str, TargetSummary], lift: Lift | None) -> str:
             per = ", ".join(f"{k}: {v * 100:+.0f}" for k, v in lift.per_kind.items())
             lines.append(f"  by kind: {per}")
     return "\n".join(lines)
+
+
+def render_sweep_text(
+    summaries: dict[str, TargetSummary], analysis: SweepAnalysis
+) -> str:
+    base = summaries[analysis.baseline]
+    lines: list[str] = []
+    lines.append(f"Baseline: {analysis.baseline}  pass_rate {_pct(base.pass_rate)}")
+    lines.append("")
+    lines.append("Variant                       pass_rate   lift     clears  ece    cost")
+    lines.append("-" * 76)
+    for v in analysis.variants:
+        cost = "—" if v.total_cost_usd is None else f"${v.total_cost_usd:.4f}"
+        ece = "—" if v.ece is None else f"{v.ece:.2f}"
+        clears = "yes" if v.clears_band else "no"
+        sign = "+" if v.lift >= 0 else ""
+        lines.append(
+            f"{v.name:<28}  {_pct(v.pass_rate):>8}   {sign}{v.lift*100:>5.1f}   "
+            f"{clears:>5}  {ece:>5}  {cost}"
+        )
+    lines.append("")
+    if analysis.suggested == analysis.baseline:
+        lines.append("SUGGESTED DEFAULT: baseline — no variant cleared the noise band.")
+    else:
+        lines.append(f"SUGGESTED DEFAULT: {analysis.suggested} "
+                     f"(highest pass-rate that clears the band).")
+    return "\n".join(lines)
+
+
+def render_sweep_html(
+    rows: list[Row],
+    summaries: dict[str, TargetSummary],
+    analysis: SweepAnalysis,
+    meta: dict[str, Any] | None = None,
+) -> str:
+    meta = meta or {}
+    base = summaries[analysis.baseline]
+    meta_html = "".join(
+        f"<span>{html.escape(str(k))}: {html.escape(str(v))}</span>" for k, v in meta.items()
+    )
+    kinds = sorted({k for v in analysis.variants for k in v.per_kind_lift})
+
+    def row(v) -> str:
+        cost = "—" if v.total_cost_usd is None else f"${v.total_cost_usd:.4f}"
+        ece = "—" if v.ece is None else f"{v.ece:.2f}"
+        cls = "good" if v.clears_band else ""
+        star = " ★" if v.name == analysis.suggested else ""
+        lo, hi = v.band
+        bar = (f'<div class="bar"><div class="fill" style="width:{v.pass_rate*100:.1f}%"></div>'
+               f'<div class="band" style="left:{lo*100:.1f}%;width:{(hi-lo)*100:.1f}%"></div></div>')
+        kind_cells = "".join(
+            f'<td class=num>{v.per_kind_lift.get(k,0)*100:+.0f}</td>' for k in kinds
+        )
+        return (f'<tr class="{cls}"><td>{html.escape(v.name)}{star}</td>'
+                f'<td class=num>{_pct(v.pass_rate)}</td><td>{bar}</td>'
+                f'<td class=num>{v.lift*100:+.1f}</td><td class=num>{"yes" if v.clears_band else "no"}</td>'
+                f'<td class=num>{ece}</td>{kind_cells}<td class=num>{cost}</td></tr>')
+
+    kind_head = "".join(f"<th>{html.escape(k)}</th>" for k in kinds)
+    body = "\n".join(row(v) for v in analysis.variants)
+    suggest = (f"baseline ({html.escape(analysis.baseline)}) — no variant cleared the band"
+               if analysis.suggested == analysis.baseline
+               else html.escape(analysis.suggested))
+
+    return f"""<!doctype html>
+<meta charset="utf-8"><title>Deliberate sweep</title>
+<style>
+  :root {{ --bg:#fff; --fg:#111; --muted:#666; --line:#e2e2e2; --fill:#3b82f6;
+           --band:#3b82f633; --good:#16a34a; }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{ --bg:#0f1115; --fg:#e8e8e8; --muted:#9aa0a6; --line:#2a2d34;
+             --fill:#60a5fa; --band:#60a5fa33; }} }}
+  body {{ background:var(--bg); color:var(--fg); font:14px/1.5 system-ui,sans-serif;
+          margin:2rem auto; max-width:1100px; padding:0 1rem; }}
+  .meta {{ color:var(--muted); font-size:.85rem; display:flex; gap:1rem; flex-wrap:wrap; }}
+  .suggest {{ padding:.75rem 1rem; border:1px solid var(--good); border-radius:8px;
+              margin:1rem 0; font-size:1.05rem; }}
+  table {{ border-collapse:collapse; width:100%; margin:1rem 0; }}
+  th,td {{ border-bottom:1px solid var(--line); padding:.4rem .6rem; text-align:left; }}
+  td.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
+  tr.good td:first-child {{ font-weight:600; }}
+  .bar {{ position:relative; height:14px; background:var(--line); border-radius:3px; min-width:110px; }}
+  .fill {{ position:absolute; height:100%; background:var(--fill); border-radius:3px; }}
+  .band {{ position:absolute; height:100%; background:var(--band);
+           border-left:1px solid var(--fill); border-right:1px solid var(--fill); }}
+  .wrap {{ overflow-x:auto; }}
+</style>
+<h1>Deliberate sweep</h1>
+<div class="meta">{meta_html}</div>
+<div class="suggest">Suggested default: <b>{suggest}</b> &nbsp;·&nbsp;
+  baseline <b>{html.escape(analysis.baseline)}</b> {_pct(base.pass_rate)}</div>
+<div class="wrap"><table>
+<thead><tr><th>variant</th><th>pass rate</th><th>rate + band</th><th>lift</th>
+<th>clears</th><th>ece</th>{kind_head}<th>cost</th></tr></thead>
+<tbody>{body}</tbody>
+</table></div>
+<p class="meta">lift = pass-rate minus baseline; "clears" = lift exceeds the combined
+seed-variance band (significant). Per-kind columns show lift by task kind. ★ = suggested.</p>
+"""
 
 
 def render_html(

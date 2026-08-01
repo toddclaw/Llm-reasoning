@@ -60,6 +60,33 @@ policy only when it clears the band:
 deliberate bench --config bench/bench.stages.example.yaml --suite bench/tasks --out report.html
 ```
 
+## Sweeps & ablation (Phase 3)
+
+Which stages actually earn their latency, and when? A **sweep** runs many pipeline
+variants against one suite on one model and ranks them by lift over a baseline, so you
+promote to the default only what clears the noise band.
+
+```bash
+deliberate sweep --config bench/sweep.example.yaml --out sweep.html
+```
+
+Variants come from three sources, freely combined in the spec:
+
+- **`ablation: [frame, plan_act_verify, best_of_n, reflect]`** — auto-expands to
+  **build-up** (prefixes: each stage's marginal value as it's added) *and*
+  **leave-one-out** (each stage's value given the others).
+- **`grid`** — sweep one stage parameter, e.g. `best_of_n.n ∈ {1,3,5,8}`.
+- **explicit `variants`** — any pipeline you name.
+
+The report ranks variants with pass-rate + variance band, lift vs baseline, whether it
+**clears the band** (significant), **per-kind lift** (does `best_of_n` help *code* but
+not *qa*?), **ECE** calibration (the `frame` stage's promise), and cost. It ends with a
+**suggested default** — the highest-pass-rate variant that clears the band, or the
+baseline if nothing does (the honest "no stage earned promotion" outcome).
+
+`pipelines/default.yaml` is the routing table the gating policy governs: promote/demote
+entries from sweep results and record the number in the commit that changes them.
+
 ## Quickstart
 
 ```bash
